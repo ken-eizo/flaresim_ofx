@@ -3,7 +3,7 @@
 **Portable OpenFX image-effect port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke).**  
 Original physical lens prescriptions, ghost ray tracing, source thresholding, and Fraunhofer starburst take precedence over host-specific effects.
 
-This is experimental source code. Windows CUDA builds and directly compares the original Nuke GPU renderer on RTX 2070 SUPER. Previous GitHub Releases do not include these latest source changes. macOS Metal has not been natively verified.
+This is experimental source code. Windows CUDA builds and directly compares the original Nuke GPU renderer on RTX 2070 SUPER. The Nuke reference Windows build is available as v0.1.0-preview.3; production host validation is still pending. macOS Metal has not been natively verified.
 
 ## Architecture
 
