@@ -27,6 +27,16 @@ endif()
 
 add_library(FlareSimOFX MODULE src/FlareSimOFX.cpp)
 target_include_directories(FlareSimOFX PRIVATE ${OFX_HEADERS})
+if(WIN32 OR APPLE)
+  target_sources(FlareSimOFX PRIVATE src/FlareSimOverlay.cpp)
+  target_compile_definitions(FlareSimOFX PRIVATE FLARESIM_HAVE_OVERLAY=1)
+  if(WIN32)
+    target_link_libraries(FlareSimOFX PRIVATE opengl32)
+  else()
+    find_library(FLARESIM_OPENGL OpenGL REQUIRED)
+    target_link_libraries(FlareSimOFX PRIVATE "${FLARESIM_OPENGL}")
+  endif()
+endif()
 target_link_libraries(FlareSimOFX PRIVATE FlareSimOptics)
 # GPU is optional. The plugin NEVER requires CUDA or Metal from the host.
 # The standard OFX image path stays CPU-addressable; optical ray tracing can

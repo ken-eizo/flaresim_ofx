@@ -3,6 +3,7 @@
 #include "ofxImageEffect.h"
 #include "ofxParam.h"
 #include "ofxProperty.h"
+#include "ofxInteract.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cmath>
@@ -42,6 +43,25 @@ static OfxImageEffectSuiteV1 fx{};
 static OfxPropertySuiteV1 pr{};
 static OfxParameterSuiteV1 pa{};
 static OfxHost host{};
+static OfxInteractSuiteV1 it{};
+struct MockInteract {Props props;};
+static OfxStatus mock_interact_get(OfxInteractHandle h,OfxPropertySetHandle* p){
+  *p=reinterpret_cast<OfxPropertySetHandle>(&reinterpret_cast<MockInteract*>(h)->props);
+  return kOfxStatOK;
+}
+static OfxStatus mock_interact_redraw(OfxInteractHandle){return kOfxStatOK;}
+static OfxStatus mock_rod(OfxImageClipHandle,OfxTime,OfxRectD* r){
+  r->x1=0;r->y1=0;r->x2=64;r->y2=32;return kOfxStatOK;
+}
+static OfxStatus mock_param_set_at(OfxParamHandle h,OfxTime t,...){
+  auto* par=reinterpret_cast<Param*>(h);
+  if(par->type!=kOfxParamTypeDouble2D)return kOfxStatErrUnknown;
+  va_list a;va_start(a,t);
+  double x=va_arg(a,double),y=va_arg(a,double);
+  va_end(a);
+  par->props.doubles[kOfxParamPropDefault]={x,y};
+  return kOfxStatOK;
+}
 
 template<typename T>
 static void set_index(std::map<std::string,std::vector<T>>& values,
@@ -158,6 +178,7 @@ static const void* suite(OfxPropertySetHandle,const char* name,int ver){
  if(std::strcmp(name,kOfxImageEffectSuite)==0)return &fx;
  if(std::strcmp(name,kOfxPropertySuite)==0)return &pr;
  if(std::strcmp(name,kOfxParameterSuite)==0)return &pa;
+ if(std::strcmp(name,kOfxInteractSuite)==0)return &it;
  return nullptr;
 }
 static void image_init(MockImage& image,int w,int h){
@@ -189,8 +210,12 @@ int main(){
  fx.clipDefine=&clip_define;fx.clipGetHandle=&clip_handle;
  fx.clipGetImage=&clip_get_image;fx.clipReleaseImage=&clip_release;
  fx.abort=&effect_abort;
+ fx.clipGetRegionOfDefinition=&mock_rod;
  pa.paramDefine=&param_define;pa.paramGetHandle=&param_handle;
  pa.paramGetValueAtTime=&param_value_at_time;
+ pa.paramSetValueAtTime=&mock_param_set_at;
+ it.interactGetPropertySet=&mock_interact_get;
+ it.interactRedraw=&mock_interact_redraw;
  host.fetchSuite=&suite;
  plugin->setHost(&host);
  auto call=[&](const char* action,OfxPropertySetHandle in=nullptr){
@@ -200,6 +225,40 @@ int main(){
  if(call(kOfxActionDescribe)!=kOfxStatOK){std::cerr<<"Describe failed\n";return 4;}
  if(call(kOfxImageEffectActionDescribeInContext)!=kOfxStatOK){std::cerr<<"Context failed\n";return 5;}
  if(call(kOfxActionCreateInstance)!=kOfxStatOK){std::cerr<<"Instance failed\n";return 6;}
+ // Confirm descriptors expose a real file picker, a stable Nuke preset,
+ // and a visible manual default instead of silent empty black layers.
+ if(effect.parameters.params.at("source_mode").get()->props.ints[kOfxParamPropDefault][0]!=1)return 17;
+ if(!effect.parameters.params.count("lens_preset"))return 18;
+ auto& lensP=effect.parameters.params.at("lens_file")->props.strings;
+ if(lensP[kOfxParamPropStringMode][0]!=kOfxParamStringIsFilePath)return 19;
+#if defined(_WIN32) || defined(__APPLE__)
+ // Exercise the real OFX overlay pen lifecycle (without OpenGL draw).
+ auto itPtr=effect.props.pointers.find(kOfxImageEffectPluginPropOverlayInteractV1);
+ if(itPtr==effect.props.pointers.end()||itPtr->second.empty()||!itPtr->second[0])return 20;
+ auto overlay=reinterpret_cast<OfxPluginEntryPoint*>(itPtr->second[0]);
+ MockInteract mh;
+ auto mp=reinterpret_cast<OfxPropertySetHandle>(&mh.props);
+ set_ptr(mp,kOfxPropEffectInstance,0,&effect);
+ if(overlay(kOfxActionDescribe,&mh,nullptr,nullptr)!=kOfxStatOK)return 21;
+ if(overlay(kOfxActionCreateInstance,&mh,nullptr,nullptr)!=kOfxStatOK)return 22;
+ Props intArgs;
+ auto aa=reinterpret_cast<OfxPropertySetHandle>(&intArgs);
+ set_double(aa,kOfxPropTime,0,0.0);
+ set_double(aa,kOfxInteractPropPixelScale,0,1.0);
+ set_double(aa,kOfxInteractPropPixelScale,1,1.0);
+ set_double(aa,kOfxInteractPropPenPosition,0,32.0);
+ set_double(aa,kOfxInteractPropPenPosition,1,16.0);
+ if(overlay(kOfxInteractActionPenDown,&mh,aa,nullptr)!=kOfxStatOK)return 23;
+ set_double(aa,kOfxInteractPropPenPosition,0,48.0);
+ set_double(aa,kOfxInteractPropPenPosition,1,8.0);
+ if(overlay(kOfxInteractActionPenMotion,&mh,aa,nullptr)!=kOfxStatOK)return 24;
+ if(overlay(kOfxInteractActionPenUp,&mh,aa,nullptr)!=kOfxStatOK)return 25;
+ const auto& pt=effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault];
+ if(std::abs(pt[0]-.75)>1e-8||std::abs(pt[1]-.25)>1e-8)return 26;
+ effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault]={.5,.5};
+ if(overlay(kOfxActionDestroyInstance,&mh,nullptr,nullptr)!=kOfxStatOK)return 27;
+#endif
+
  image_init(source,64,32);image_init(output,64,32);
  const size_t sample=(size_t(16)*64+32)*4;
  source.pixels[sample]=80;source.pixels[sample+1]=90;source.pixels[sample+2]=100;
@@ -209,6 +268,25 @@ int main(){
  Props args;set_double(reinterpret_cast<OfxPropertySetHandle>(&args),kOfxPropTime,0,0);
  for(int i=0;i<4;i++)set_int(reinterpret_cast<OfxPropertySetHandle>(&args),
     kOfxImageEffectPropRenderWindow,i,(i==2?64:(i==3?32:0)));
+ // Regression: a black opaque solid with default settings must produce
+ // a visible physical flare. This also exercises the bundled default lens.
+ const float markerR=source.pixels[sample], markerG=source.pixels[sample+1],
+             markerB=source.pixels[sample+2];
+ source.pixels[sample]=source.pixels[sample+1]=source.pixels[sample+2]=0.f;
+ mode->props.ints[kOfxParamPropDefault][0]=0; // Composite
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK) {
+   std::cerr<<"Default black plate render failed\n";return 28;
+ }
+ double flare_energy=0;
+ for(size_t pixel=0;pixel<output.pixels.size();pixel+=4)
+   flare_energy+=std::max({0.f,output.pixels[pixel],output.pixels[pixel+1],output.pixels[pixel+2]});
+ if(!(flare_energy>1e-6 && std::isfinite(flare_energy))) {
+   std::cerr<<"Default black plate did not emit flare\n";return 29;
+ }
+ std::cout<<"Default black plate flare energy="<<flare_energy<<"\n";
+ source.pixels[sample]=markerR;source.pixels[sample+1]=markerG;source.pixels[sample+2]=markerB;
+ mode->props.ints[kOfxParamPropDefault][0]=5;
+ std::fill(output.pixels.begin(),output.pixels.end(),0.f);
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
    std::cerr<<"Render failed\n";return 7;
  }

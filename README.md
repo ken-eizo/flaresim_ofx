@@ -32,9 +32,9 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 ## Controls
 
-**Lens Prescription:** Exact name of an upstream Nuke `.lens` file, such as `AI_Nikkor_50mm_F1.2S.lens`. The `Resources/lenses` folder contains the original prescriptions and `Resources/LensCatalog.txt` lists the 1,370 canonical names. **Custom Lens File** can override the preset with an absolute path.
+**Lens Preset:** Six common Nuke optical prescriptions. **Lens File (Optional):** Standard OFX file-picker input for any of the 1,370 bundled `.lens` files or an external prescription. Leave it empty to use the selected preset. Bundled lenses are in `FlareSim.ofx.bundle/Contents/Resources/lenses/`. The old `lens_name` parameter is kept hidden for saved project compatibility.
 
-**Light Sources:** Detect Highlights (upstream default concept) or Manual Position in normalised 0..1 coordinates.
+**Light Sources:** Manual Position is the initial mode: even a black opaque plate gets a flare centered at 0.5,0.5. Detect Highlights still uses the upstream Nuke threshold and block extraction. The standard OpenFX overlay lets you drag Light Position on hosts supporting V1 OpenGL overlays. The X/Y controls always remain available.
 
 **Optical:** FOV, Flare Gain, Ray Grid, Max Ghost Pairs, Aperture, Pupil Jitter, Spectral Samples, selected reflection pair, and Optical Renderer (Auto / CPU / GPU with fallback).
 

@@ -8,6 +8,9 @@
 #include "FlareLensOptics.hpp"
 #include "FlareLensCpuParallel.hpp"
 #include "FlareSimGpu.hpp"
+#if defined(FLARESIM_HAVE_OVERLAY)
+#include "FlareSimOverlay.hpp"
+#endif
 #include "SourceDetection.hpp"
 #include "starburst.h"
 #include <algorithm>
@@ -43,6 +46,15 @@ constexpr const char* ID="dev.keneizo.FlareSimOFX";
 constexpr const char* kSource=kOfxImageEffectSimpleSourceClipName;
 constexpr const char* kOutput=kOfxImageEffectOutputClipName;
 constexpr float pi=3.14159265358979323846f;
+constexpr const char* kLensDefault="AI_Nikkor_50mm_F1.2S.lens";
+constexpr const char* kPresetFiles[]{
+  "AI_Nikkor_50mm_F1.2S.lens",
+  "Canon_50mm_F1.2_(Canon_FD50mm_F1.2L).lens",
+  "Leica_50mm_F1.4_(Leica_Summilux_50mm_F1.4).lens",
+  "Zeiss_50mm_F1.3_(Arri_Zeiss_Master_Prime_T1.3_50mm).lens",
+  "Sony_50mm_F1.45_IF_(Sony_Planar_T_FE_50mm_F1.4_ZA).lens",
+  "Cosina_50mm_f1_(Cosina_Voigtlander_Nokton_50mm_F1.0_Aspherical).lens"
+};
 
 struct Instance {
   OfxImageClipHandle source=nullptr, output=nullptr;
@@ -234,6 +246,13 @@ OfxStatus describe(OfxImageEffectHandle e){
   prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);
   prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderInstanceSafe);
   prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+#if defined(FLARESIM_HAVE_OVERLAY)
+  // OFX V1 standard overlay. Only advertise when the host supplies its
+  // interact suite; unsupported hosts retain numeric Light Position controls.
+  if(fl::overlay::supported())
+    prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,
+                        0,reinterpret_cast<void*>(&fl::overlay::entry));
+#endif
   return kOfxStatOK;
 }
 OfxStatus describe_context(OfxImageEffectHandle e){
@@ -245,11 +264,31 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   }
   OfxParamSetHandle s=nullptr;
   if(fx->getParamSet(e,&s)!=kOfxStatOK)return kOfxStatFailed;
-  define_string(s,"lens_name","Lens Prescription","AI_Nikkor_50mm_F1.2S.lens",
-                "Exact filename from the 1370 original Nuke lens presets in Resources/lenses.");
-  define_string(s,"lens_file","Custom Lens File","",
-                "Optional absolute .lens path. Overrides bundled Lens Prescription.");
-  define_choice(s,"source_mode","Light Sources",0,{"Detect Highlights","Manual Position"});
+  define_choice(s,"lens_preset","Lens Preset",0,{
+    "Nikkor 50mm f/1.2","Canon FD 50mm f/1.2L",
+    "Leica Summilux 50mm f/1.4","ARRI Zeiss Master Prime 50mm T1.3",
+    "Sony Planar 50mm f/1.4","Voigtlander Nokton 50mm f/1.0"
+  });
+  // The original Nuke catalog (1370 files) is bundled unchanged.
+  // File path mode lets OFX hosts supply a real native file browser instead
+  // of forcing users to enter .lens paths manually.
+  define_string(s,"lens_file","Lens File (Optional)","",
+                "Browse for any .lens file, including bundled ones. Empty = Lens Preset.");
+  OfxParamHandle unused_handle=nullptr;
+  OfxPropertySetHandle lens_file_props=nullptr;
+  params->paramGetHandle(s,"lens_file",&unused_handle,&lens_file_props);
+  if(lens_file_props){
+    prop->propSetString(lens_file_props,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);
+    prop->propSetInt(lens_file_props,kOfxParamPropStringFilePathExists,0,1);
+  }
+  // Keep the legacy identifier hidden so projects saved with preview v0.1.0
+  // still load without silently losing their previous lens name.
+  define_string(s,"lens_name","Legacy Lens Name",kLensDefault,
+                "Legacy exact filename; Lens File and Lens Preset take precedence.");
+  OfxPropertySetHandle legacy_props=nullptr;
+  params->paramGetHandle(s,"lens_name",&unused_handle,&legacy_props);
+  if(legacy_props)prop->propSetInt(legacy_props,kOfxParamPropSecret,0,1);
+  define_choice(s,"source_mode","Light Sources",1,{"Detect Highlights","Manual Position"});
   OfxPropertySetHandle q=nullptr;
   params->paramDefine(s,kOfxParamTypeDouble2D,"light_position",&q);
   prop->propSetString(q,kOfxPropLabel,0,"Light Position (0..1)");
@@ -420,14 +459,30 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
     const std::string custom=string_param(d,"lens_file",time);
     if(!custom.empty())path=fs::u8path(custom);
     else {
-      const std::string name=string_param(d,"lens_name",time);
-      // No path separators in bundled preset names. Custom files need explicit path.
+      const int preset=integer(d,"lens_preset",time,0);
+      const std::string legacy=string_param(d,"lens_name",time);
+      // Preserve previous preview projects that manually entered an exact name.
+      const std::string name=legacy!=kLensDefault && preset==0?
+        legacy:kPresetFiles[std::clamp(preset,0,int(std::size(kPresetFiles))-1)];
+      // Bundled presets must never escape the immutable resource folder.
       if(name.find('/')!=std::string::npos||name.find('\\')!=std::string::npos||
          name.empty()||name=="."||name=="..")return kOfxStatErrValue;
       path=lens_directory()/fs::u8path(name);
     }
     auto lens=load_lens(path);
-    if(!lens)return kOfxStatFailed;
+    if(!lens){
+      std::fprintf(stderr,"FlareSim OFX: failed to open lens: %s\n",path.string().c_str());
+      // A missing lens must NEVER silently substitute a different one, but a
+      // failed effect must not turn the source clip into an opaque black plate.
+      // Instead pass through the original source in Composite mode.
+      if(mode==0){
+        for(int yy=std::max(window.y1,output.bounds.y1);yy<std::min(window.y2,output.bounds.y2);++yy)
+          for(int xx=std::max(window.x1,output.bounds.x1);xx<std::min(window.x2,output.bounds.x2);++xx)
+            for(int cc=0;cc<output.channels;++cc)output.write(xx,yy,cc,input.read(xx,yy,cc));
+        return kOfxStatOK;
+      }
+      return kOfxStatFailed;
+    }
     const float blur=float(number(d,"ghost_blur",time,0));
     const int passes=integer(d,"ghost_blur_passes",time,3);
     const int backend=integer(d,"render_backend",time,0);
@@ -500,6 +555,10 @@ OfxStatus load(){
   fx=(OfxImageEffectSuiteV1*)host->fetchSuite(host->host,kOfxImageEffectSuite,1);
   prop=(OfxPropertySuiteV1*)host->fetchSuite(host->host,kOfxPropertySuite,1);
   params=(OfxParameterSuiteV1*)host->fetchSuite(host->host,kOfxParameterSuite,1);
+#if defined(FLARESIM_HAVE_OVERLAY)
+  auto* isuite=(OfxInteractSuiteV1*)host->fetchSuite(host->host,kOfxInteractSuite,1);
+  fl::overlay::initialize(fx,prop,params,isuite);
+#endif
   return fx&&prop&&params?kOfxStatOK:kOfxStatFailed;
 }
 OfxStatus main_entry(const char* action,const void* raw,
