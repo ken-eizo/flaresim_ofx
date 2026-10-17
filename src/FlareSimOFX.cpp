@@ -7,12 +7,14 @@
 #include "FlareLensCore.hpp"
 #include "FlareLensOptics.hpp"
 #include "FlareLensCpuParallel.hpp"
+#include "FlareSimGpu.hpp"
 #include "SourceDetection.hpp"
 #include "starburst.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -280,6 +282,7 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   define_int(s,"haze_passes","Haze Blur Passes",3,0,8,"Haze blur passes.");
   define_double(s,{"starburst_gain","Starburst Gain",0,0,1e5,"Physical Fraunhofer diffraction gain."});
   define_double(s,{"starburst_scale","Starburst Scale",.15,0,1,"Image-diagonal fraction."});
+  define_choice(s,"render_backend","Optical Renderer",0,{"Auto (GPU preferred)","CPU","GPU (fallback CPU)"});
   define_choice(s,"output_mode","Output Mode",0,
     {"Composite","Flare Only","Ghost Only","Haze Only","Starburst Only","Sources Only"});
   define_boolean(s,"preview","Preview Mode",0,"Use reduced preview sample settings.");
@@ -425,14 +428,24 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
     }
     auto lens=load_lens(path);
     if(!lens)return kOfxStatFailed;
-    const auto ghost=fl::render_sources_parallel(*lens,sources,settings,w,h,
-                     {&abort_requested,e},4);
-    if(ghost.abort_error)return kOfxStatReplyDefault;
-    if(ghost.rgb.size()==emitted.size())emitted=ghost.rgb;
     const float blur=float(number(d,"ghost_blur",time,0));
     const int passes=integer(d,"ghost_blur_passes",time,3);
-    if(blur>0 && passes>0)
-      fl::box_blur_rgb(emitted,w,h,int(std::round(blur*std::hypot(float(w),float(h)))),passes);
+    const int backend=integer(d,"render_backend",time,0);
+    bool gpu_rendered=false;
+    if(backend!=1 && fl::ofxgpu::available()) {
+      gpu_rendered=fl::ofxgpu::render_ghosts(*lens,sources,settings,w,h,blur,passes,emitted);
+    }
+    if(std::getenv("FLARESIM_GPU_TRACE"))
+      std::fprintf(stderr,"FlareSimOFX optical renderer: %s (%zu sources, grid %d)\n",
+                   gpu_rendered?"GPU":"CPU",sources.size(),settings.grid);
+    if(!gpu_rendered){
+      const auto ghost=fl::render_sources_parallel(*lens,sources,settings,w,h,
+                       {&abort_requested,e},4);
+      if(ghost.abort_error)return kOfxStatReplyDefault;
+      if(ghost.rgb.size()==emitted.size())emitted=ghost.rgb;
+      if(blur>0 && passes>0)
+        fl::box_blur_rgb(emitted,w,h,int(std::round(blur*std::hypot(float(w),float(h)))),passes);
+    }
   }
   if(fx->abort(e))return kOfxStatReplyDefault;
   if(need_haze && number(d,"haze_gain",time,0)>0 && integer(d,"source_mode",time,0)==0) {

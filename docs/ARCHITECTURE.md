@@ -32,7 +32,7 @@ The renderer is deterministic for fixed frame, parameters, lens and source image
 
 ## CPU, GPU and precision
 
-CPU is mandatory baseline; plugin does not claim or require any OFX GPU extension. Future optional accelerated paths must provide a fallback when suites/extensions or GPU devices are absent. GPU buffers/streams from After Effects are NOT directly portable to OFX.
+CPU is mandatory baseline; plugin does not claim or require any OFX GPU extension. CUDA/Metal ray tracing is invoked in private backend contexts on standard OFX CPU images and copied back to OFX host memory. See [GPU](GPU.md). Future optional accelerated paths must provide a fallback when suites/extensions or GPU devices are absent. GPU buffers/streams from After Effects are NOT directly portable to OFX.
 
 Image inputs are read in the host-provided pixel depth; float paths preserve HDR values and negative RGB (before highlight threshold), while integer outputs are clamped as required. Threshold, flare gain and source colour use **scene-linear radiometric RGB**, not automatic host-specific LUTs.
 
@@ -50,10 +50,10 @@ Image inputs are read in the host-provided pixel depth; float paths preserve HDR
 
 | Host | Load/render smoke test | CPU parity | GPU |
 |---|---|---|---|
-| Natron | Not tested | Not tested | Not implemented |
-| DaVinci Resolve / Fusion | Not tested | Not tested | Not implemented |
-| Nuke OpenFX host | Not tested | Not tested | Not implemented |
-| Other OFX hosts | Not tested | Not tested | Not implemented |
+| Natron | Not tested | Not tested | Windows CUDA engine tested outside host, Metal unverified |
+| DaVinci Resolve / Fusion | Not tested | Not tested | Windows CUDA engine tested outside host, Metal unverified |
+| Nuke OpenFX host | Not tested | Not tested | Windows CUDA engine tested outside host, Metal unverified |
+| Other OFX hosts | Not tested | Not tested | Windows CUDA engine tested outside host, Metal unverified |
 
 Avoid stating universal compatibility before these checks. OFX is a common API specification; hosts vary in which contexts, image layouts, image depths, overlays, and optional suites they implement.
 
@@ -61,6 +61,6 @@ Avoid stating universal compatibility before these checks. OFX is a common API s
 
 1. Real-host validation and OFX contract fixes.
 2. Complete Nuke optical + output parity tests and all-pair controls.
-3. Optional GPU acceleration with strict host feature detection and CPU fallback.
+3. Direct OFX host-managed GPU buffers/streams where supported; current private CUDA/Metal implementations always retain CPU fallback.
 4. Native standard OFX overlay for manual light position, when supported.
 5. macOS and Linux builds, CI, versioned releases, installation guides.

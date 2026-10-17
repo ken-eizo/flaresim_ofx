@@ -216,12 +216,38 @@ int main(){
    peak=std::max({peak,output.pixels[i],output.pixels[i+1],output.pixels[i+2]});
  if(!(peak>2.f&&std::isfinite(peak))){std::cerr<<"No bright source: "<<peak<<"\n";return 8;}
  mode->props.ints[kOfxParamPropDefault][0]=2; // Ghost Only
- effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]=4;
- effect.parameters.params.at("max_pairs")->props.ints[kOfxParamPropDefault][0]=4;
+ effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]=64;
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
+ effect.parameters.params.at("light_radiance")->props.doubles[kOfxParamPropDefault][0]=100.0;
+ effect.parameters.params.at("max_pairs")->props.ints[kOfxParamPropDefault][0]=78;
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
    std::cerr<<"Optical render failed\n";return 9;
  }
  for(float c:output.pixels)if(!std::isfinite(c)){std::cerr<<"Nonfinite output\n";return 10;}
+ // Request the CPU path explicitly, then compare to the platform GPU path.
+ // These are separate host render actions; never share GPU scratch between calls.
+ auto* renderer=effect.parameters.params.at("render_backend").get();
+ renderer->props.ints[kOfxParamPropDefault][0]=1;
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
+   std::cerr<<"CPU fallback render failed\n";return 13;
+ }
+ const auto cpu=output.pixels;
+ renderer->props.ints[kOfxParamPropDefault][0]=2;
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
+   std::cerr<<"GPU preferred render failed\n";return 14;
+ }
+ double cpu_sum=0,gpu_sum=0,diff_sum=0;
+ for(size_t i=0;i<output.pixels.size();i+=4){
+   for(int c=0;c<3;c++){
+     cpu_sum+=std::abs(cpu[i+c]);
+     gpu_sum+=std::abs(output.pixels[i+c]);
+     diff_sum+=std::abs(cpu[i+c]-output.pixels[i+c]);
+   }
+ }
+ if(!std::isfinite(cpu_sum+gpu_sum+diff_sum))return 15;
+ if(cpu_sum>1.0 && diff_sum>cpu_sum*0.25){std::cerr<<"GPU parity failed\n";return 16;}
+ std::cout<<"Ghost CPU L1="<<cpu_sum<<" GPU-preferred L1="<<gpu_sum
+          <<" L1-diff="<<diff_sum<<"\n";
  if(call(kOfxActionDestroyInstance)!=kOfxStatOK)return 11;
  if(call(kOfxActionUnload)!=kOfxStatOK)return 12;
  std::cout<<"OFX mock-host sources + optical render OK\n";return 0;

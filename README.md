@@ -3,14 +3,14 @@
 **Portable OpenFX image-effect port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke).**  
 Original physical lens prescriptions, ghost ray tracing, source thresholding, and Fraunhofer starburst take precedence over host-specific effects.
 
-This is **an early CPU implementation (v0.1.0)**, not a verified cross-host production release. The Windows x64 OFX binary builds and passes the initial standalone tests; no real OFX host has been tested yet.
+This is **an early GPU-enabled implementation (development preview)**, not a verified cross-host production release. The Windows x64 CUDA OFX binary builds, selects the GPU on an RTX 2070 SUPER and passes the standalone tests; **no production OFX host has been tested yet**. Metal backend source and shader build integration are present, but **native macOS compilation remains unverified until macOS runners are available**.
 
 ## Architecture
 
 - **Nuke is the reference** for optics, lens data, ghost reflection, source detection, haze, and starburst.
 - **FlareSimAE is a secondary source** for independent CPU rendering, performance improvements, pupil sampling, and thread-safe caches.
 - **OpenFX is the delivery format**, not a DaVinci Resolve-specific integration. It uses only standard OFX Image Effect API 1, with no Nuke NDK or Adobe SDK dependency.
-- A pure CPU render path is always available. **CUDA and Metal are not yet implemented in this OFX port.** Cross-host GPU support will be optional, host-capability based.
+- A pure CPU render path is always available. **Windows CUDA is implemented and hardware-tested**, and **macOS Metal backend and build pipeline are implemented but macOS compilation/hardware tests are pending**. The OFX host always sees ordinary CPU buffers; a private GPU accelerates the optical rays when present.
 
 ## Build
 
@@ -36,7 +36,7 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 **Light Sources:** Detect Highlights (upstream default concept) or Manual Position in normalised 0..1 coordinates.
 
-**Optical:** FOV, Flare Gain, Ray Grid, Max Ghost Pairs, Aperture, Pupil Jitter, Spectral Samples, selected reflection pair.
+**Optical:** FOV, Flare Gain, Ray Grid, Max Ghost Pairs, Aperture, Pupil Jitter, Spectral Samples, selected reflection pair, and Optical Renderer (Auto / CPU / GPU with fallback).
 
 **Highlight extraction:** Threshold, Source Cap, Downsample, Max Sources, Cluster Radius. The image is assumed to be **scene-linear**; threshold is not applied to display-referred sRGB.
 
@@ -46,16 +46,16 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 ## Status and caveats
 
-- Windows x64: CMake Release build and four standalone tests pass (optics, all 1,370 lens prescriptions, C ABI exports, and a synthetic OFX host render).
-- macOS/Linux: source/CMake portability targeted, not yet built or tested.
+- Windows x64: CUDA 13.0 Release build and four standalone tests pass (optics, all 1,370 lens prescriptions, C ABI exports, and a synthetic OFX host render). An RTX 2070 SUPER successfully executed the CUDA ghost kernel.
+- macOS: Metal shader generation and native Objective-C++ adapter implemented; **build and GPU test still unverified**. Linux remains CPU-only.
 - Hosts: DaVinci Resolve, Fusion, Natron, Nuke, and others **must be verified individually**. An OFX API plugin is not guaranteed to work in every host/version.
-- GPU: CPU-only. This can be very slow with many light sources, reflection pairs, or high Ray Grid. Set Preview Mode and limit sources for now.
+- GPU: CUDA/Metal only accelerate Ghost ray tracing and its blur currently. Automatic source detection, Haze and Starburst still run on CPU. GPU requires host-to-device staging / readback, not a zero-copy OFX host integration.
 - Fidelity: the ghost core uses source-derived CPU code; a complete pixel-level parity study against the original Nuke CUDA kernel is still outstanding.
 - Portable OFX 1.x lacks a universal, feature-equivalent mapping for Nuke custom image channels and per-pair checkboxes. Those remain documented follow-up items.
 - Output images support RGBA / RGB with 8-, 16-bit integer and 32-bit floating-point data; full-frame image input is required for optical evaluation, and render window writes respect OFX image bounds.
 - No verified production host UI/overlay. An optional overlay must use standard OFX capability checks.
 
-See [Architecture and compatibility](docs/ARCHITECTURE.md).
+See [Architecture and compatibility](docs/ARCHITECTURE.md) and [GPU implementation and building](docs/GPU.md).
 
 ## Attribution and licensing
 

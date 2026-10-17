@@ -1,32 +1,74 @@
-name: Build OFX (CPU)
+name: Build FlareSim OFX (CUDA / Metal / CPU)
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
 jobs:
-  build:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+  windows-cuda:
+    name: Windows x64 CUDA
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
+      - name: Install NVIDIA CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: '12.8.1'
+          method: 'network'
+          sub-packages: '["nvcc","cudart","cudart_dev","visual_studio_integration"]'
+      - name: Configure
         shell: pwsh
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-      - name: Build
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DFLARESIM_GPU=ON
+      - name: Build CUDA OFX
+        shell: pwsh
         run: cmake --build build --config Release --parallel 4
-      - name: Test
+      - name: Smoke tests (GPU device optional)
+        shell: pwsh
         run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
-          name: FlareSimOFX-${{ matrix.os }}
+          name: FlareSimOFX-Windows-x64-CUDA
+          path: build/FlareSim.ofx.bundle/
+          if-no-files-found: error
+
+  macos-metal:
+    name: macOS universal Metal
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Metal compiler
+        run: xcrun -sdk macosx --find metal && xcrun -sdk macosx --find metallib
+      - name: Configure universal macOS binary
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DFLARESIM_GPU=ON -DBUILD_TESTING=ON \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+      - name: Build Metal OFX and shaders
+        run: cmake --build build --config Release --parallel 4
+      - name: Verify universal binary
+        run: |
+          lipo -info build/FlareSim.ofx.bundle/Contents/MacOS/FlareSim.ofx
+          test -s build/FlareSim.ofx.bundle/Contents/Resources/FlareLensMetal.metallib
+      - name: Smoke tests (GPU device optional)
+        run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlareSimOFX-macOS-universal-Metal
+          path: build/FlareSim.ofx.bundle/
+          if-no-files-found: error
+
+  linux-cpu:
+    name: Linux x86_64 CPU fallback
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFLARESIM_GPU=OFF -DBUILD_TESTING=ON
+      - run: cmake --build build --parallel 4
+      - run: ctest --test-dir build --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlareSimOFX-Linux-x86_64-CPU
           path: build/FlareSim.ofx.bundle/
           if-no-files-found: error
