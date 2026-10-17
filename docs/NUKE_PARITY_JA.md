@@ -67,3 +67,14 @@ CUDA参照DLLを紛失したときは別レンズへ置き換えたりせず、C
 ## 本家ライセンスとソース
 
 光学コードと配布されるレンズ定義は [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke)。OFXは公式OpenFX C APIを利用。CPU最適化・Golden Angleの実装は [ken-eizo/flaresim_ae](https://github.com/ken-eizo/flaresim_ae) に由来する。詳細はLICENSE、NOTICE.md参照。
+
+## UI相互運用性の修正（2026-10-18）
+
+- DescribeInContextでは、paramDefineの戻り値であるディスクリプタに、ファイル選択形式・グループ所属・旧パラメータ非表示の属性を直接設定する。instance専用paramGetHandleを使用しない。
+- Nuke本家のLens Fileを最初に表示。次のLens Presetには本家1,370本すべてを標準Choiceとして登録する。ファイル参照ボタンはホスト対応が必要だがドロップダウンはホスト標準UIで利用できる。
+- ギズモは標準Overlay Interact V1(OpenGL)、V2(DrawSuite)で描画。ドラッグでManual Positionへ移行する。ホストがオーバーレイ未対応ならXY数値入力を使う。
+- 名前のNuke/OFX装飾を消し、追加機能はAdditional Controlsへ集約。
+- Output ModeのSources Onlyはレンズ未選択でも検出された明点を表示する。
+- NukeのSeparate channelsは任意の名前付き出力を必要とし、OFX全ホスト共通では保証されないため削除。標準出力はFlare as RGBとし、NukeのSeparate channels初期状態とは異なることを明示する。
+- 初期Threshold=2は本家HDR設定のまま。SDR素材では検出閾値を下げる必要がある。
+- Resolveを含む実ホストでのUI表示・最終結果は引き続き未検証。標準OFXでの実装のみでは全ホスト動作保証にはならない。

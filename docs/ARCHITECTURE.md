@@ -80,3 +80,7 @@ Avoid stating universal compatibility before these checks. OFX is a common API s
 Parameter groups follow original Nuke order; OFX Extensions is last. Restored original Ray Grid=64, Ghost Blur=0.003, manual FOV V=24, auto FOV V, sensor/focal controls, and Detect Highlights default. The optional Mask clip is applied via block-average alpha after source capping, matching Nuke.
 
 Unfinished compatibility items: full dynamic 500-checkbox ghost-pair UI, arbitrary named Nuke image channels, Nuke-vs-OFX reference-frame parity and real-host integration tests.
+
+## OFX descriptor and overlay compatibility
+
+During DescribeInContext, use parameter descriptors returned from paramDefine for file-path mode, parent-group association, and hidden legacy flags. A strict mock-host test rejects instance-level paramGetHandle requests during descriptor definition. All 1,370 Nuke prescription names are exposed through a standard OFX Choice fallback. Viewer interaction supports optional OverlayInteractV1 (OpenGL) and OverlayInteractV2 (DrawSuite). Host support for an interact remains optional; numeric XY controls never require it.

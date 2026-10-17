@@ -3,7 +3,7 @@
 **Portable OpenFX image-effect port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke).**  
 Original physical lens prescriptions, ghost ray tracing, source thresholding, and Fraunhofer starburst take precedence over host-specific effects.
 
-This is experimental source code. Windows CUDA builds and directly compares the original Nuke GPU renderer on RTX 2070 SUPER. The Nuke reference Windows build is available as v0.1.0-preview.3; production host validation is still pending. macOS Metal has not been natively verified.
+This is experimental source code. Windows CUDA builds and directly compares the original Nuke GPU renderer on RTX 2070 SUPER. The current v0.1.0-preview.4 release includes the portable UI fixes; production host validation is still pending. macOS Metal has not been natively verified.
 
 ## Architecture
 
@@ -30,23 +30,25 @@ On Windows, copy **the entire** `FlareSim.ofx.bundle` folder (not only the `.ofx
 
 For macOS / Linux use a suitable generator and copy the entire built bundle to a supported OFX plugin directory (usually `/Library/OFX/Plugins` on macOS or `/usr/OFX/Plugins` on Linux).
 
-## Controls
+## Controls and selecting a lens
 
-**Lens File:** The first Nuke control. The original default is EMPTY: no lens is silently substituted. All 1,370 prescriptions are bundled, and a separate OFX lens preset can be chosen explicitly.
+Original Nuke control labels and order are used in the main groups. Optional tools appear under **Additional Controls**. This effect contains no application-specific code.
 
-**Light Sources:** Detect Highlights (Nuke) is the initial mode. Optional Manual Position and overlay are in OFX Extensions.
+**Lens File:** The first parameter, as in Nuke. A host may offer a file picker, but OpenFX cannot guarantee one. Enter an absolute .lens path or a bundled filename.
 
-**Controls:** Nuke ordering and defaults are kept: Ray Grid 64, Ghost Blur 0.003, Highlight Detection, auto FOV V. Pupil Jitter adds Golden Angle (Vogel) as the fourth option after Off, Stratified, Halton.
+**Lens Preset:** A standard OpenFX Choice immediately below Lens File. It offers all 1,370 original Nuke lens prescriptions without depending on a host file picker. Leave Lens File empty to use it. The existing six preset indices remain stable.
 
-**Highlight extraction:** Threshold, Source Cap, Downsample, Max Sources, Cluster Radius. The image is assumed to be **scene-linear**; threshold is not applied to display-referred sRGB.
+**First use:** Select a Lens Preset such as AI_Nikkor_50mm_F1.2S.lens. The original Nuke default does not select a lens, so Ghost requires an explicit selection. Nuke Threshold=2 assumes HDR data. Typical SDR material (RGB between 0 and 1) has no highlights above 2, so lower Threshold (for example 0.1), or select Manual Position. **Sources Only** can be used before selecting a lens to inspect bright-pixel detection.
 
-**Output Mode:** Composite / Flare Only / Ghost Only / Haze Only / Starburst Only / Sources Only. Portable RGBA output replaces Nuke's arbitrary named-channel groups (which the baseline OFX API does not guarantee across hosts).
+**Output Mode:** Flare as RGB, Sources Only, Composite. Original Nuke names are retained where functionality is equivalent. Nuke Separate channels writes arbitrary named planes, which baseline OpenFX cannot guarantee across hosts; it is intentionally not presented as a nonfunctional option. The OFX default output is Flare as RGB, not Nuke's separate-channel default.
 
-**Preview Mode:** Overrides grid, downsample, spectral samples, and max sources. Like the Nuke preview, it compensates source downsample energy approximately; capped sources may still differ.
+**Light Position:** Optional normalized XY input in Additional Controls. Standard OpenFX V1 OpenGL and V2 DrawSuite interact handlers allow the crosshair to be dragged, automatically enabling Manual Position. If the host does not expose an overlay, the XY fields remain usable. No host-specific branches.
 
-## Remaining Nuke-specific gaps
+**Pupil Jitter:** Original Off, Stratified, Halton, then optional Golden Angle (Vogel). No original sampler index was changed.
 
-Generic OFX outputs do not guarantee Nuke's arbitrary named channels (flare.rgb, source.rgb, haze.rgb and starburst.rgb), so portable Output Mode is used. Nuke's complete individual 500-pair toggles are not yet implemented; the OFX single-pair selection is only a partial substitute. An optional second Mask clip now gates source detection like the Nuke original. Pixel-level reference parity and cross-host testing remain pending.
+## Nuke fidelity / OFX capability limits
+
+File-picker and overlay UIs are optional host features: standard OpenFX cannot force them to appear in every application. A built-in native lens Choice is the host-neutral fallback. Original Nuke named image channels and 500 individual optical pair controls remain incomplete. GPU ray tracing and blur have independent upstream tests; Nuke application rendering, Haze, Starburst, host colour management, macOS Metal and actual host overlay operation still need QA.
 
 ## Status and caveats
 

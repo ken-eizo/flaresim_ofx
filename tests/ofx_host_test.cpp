@@ -4,6 +4,7 @@
 #include "ofxParam.h"
 #include "ofxProperty.h"
 #include "ofxInteract.h"
+#include "ofxDrawSuite.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cmath>
@@ -37,6 +38,7 @@ struct MockImage {
  Props props;
  std::vector<float> pixels;
 };
+static bool defining_params=false;
 static Effect effect;
 static MockImage source,output;
 static OfxImageEffectSuiteV1 fx{};
@@ -44,6 +46,20 @@ static OfxPropertySuiteV1 pr{};
 static OfxParameterSuiteV1 pa{};
 static OfxHost host{};
 static OfxInteractSuiteV1 it{};
+static OfxDrawSuiteV1 ds{};
+static int draw_primitive_calls=0;
+static OfxStatus mock_draw_color(OfxDrawContextHandle,const OfxRGBAColourF*){
+ return kOfxStatOK;
+}
+static OfxStatus mock_draw_line_width(OfxDrawContextHandle,float){
+ return kOfxStatOK;
+}
+static OfxStatus mock_draw_primitive(OfxDrawContextHandle,OfxDrawPrimitive,
+                                    const OfxPointD*,int){
+ ++draw_primitive_calls;
+ return kOfxStatOK;
+}
+
 struct MockInteract {Props props;};
 static OfxStatus mock_interact_get(OfxInteractHandle h,OfxPropertySetHandle* p){
   *p=reinterpret_cast<OfxPropertySetHandle>(&reinterpret_cast<MockInteract*>(h)->props);
@@ -55,11 +71,18 @@ static OfxStatus mock_rod(OfxImageClipHandle,OfxTime,OfxRectD* r){
 }
 static OfxStatus mock_param_set_at(OfxParamHandle h,OfxTime t,...){
   auto* par=reinterpret_cast<Param*>(h);
-  if(par->type!=kOfxParamTypeDouble2D)return kOfxStatErrUnknown;
   va_list a;va_start(a,t);
-  double x=va_arg(a,double),y=va_arg(a,double);
+  if(par->type==kOfxParamTypeDouble2D){
+    double x=va_arg(a,double),y=va_arg(a,double);
+    par->props.doubles[kOfxParamPropDefault]={x,y};
+  }else if(par->type==kOfxParamTypeChoice){
+    const int mode=va_arg(a,int);
+    par->props.ints[kOfxParamPropDefault]={mode};
+  }else{
+    va_end(a);
+    return kOfxStatErrUnknown;
+  }
   va_end(a);
-  par->props.doubles[kOfxParamPropDefault]={x,y};
   return kOfxStatOK;
 }
 
@@ -146,6 +169,7 @@ static OfxStatus param_define(OfxParamSetHandle,const char* type,const char* nam
 }
 static OfxStatus param_handle(OfxParamSetHandle,const char* name,
                               OfxParamHandle* out,OfxPropertySetHandle* props){
+ if(defining_params)return kOfxStatErrBadHandle;
  auto it=effect.parameters.params.find(name);
  if(it==effect.parameters.params.end())return kOfxStatErrUnknown;
  *out=reinterpret_cast<OfxParamHandle>(it->second.get());
@@ -179,6 +203,7 @@ static const void* suite(OfxPropertySetHandle,const char* name,int ver){
  if(std::strcmp(name,kOfxPropertySuite)==0)return &pr;
  if(std::strcmp(name,kOfxParameterSuite)==0)return &pa;
  if(std::strcmp(name,kOfxInteractSuite)==0)return &it;
+ if(std::strcmp(name,kOfxDrawSuite)==0)return &ds;
  return nullptr;
 }
 static void image_init(MockImage& image,int w,int h){
@@ -216,6 +241,9 @@ int main(){
  pa.paramSetValueAtTime=&mock_param_set_at;
  it.interactGetPropertySet=&mock_interact_get;
  it.interactRedraw=&mock_interact_redraw;
+ ds.setColour=&mock_draw_color;
+ ds.setLineWidth=&mock_draw_line_width;
+ ds.draw=&mock_draw_primitive;
  host.fetchSuite=&suite;
  plugin->setHost(&host);
  auto call=[&](const char* action,OfxPropertySetHandle in=nullptr){
@@ -223,7 +251,9 @@ int main(){
  };
  if(call(kOfxActionLoad)!=kOfxStatOK){std::cerr<<"Load failed\n";return 3;}
  if(call(kOfxActionDescribe)!=kOfxStatOK){std::cerr<<"Describe failed\n";return 4;}
+ defining_params=true;
  if(call(kOfxImageEffectActionDescribeInContext)!=kOfxStatOK){std::cerr<<"Context failed\n";return 5;}
+ defining_params=false;
  if(call(kOfxActionCreateInstance)!=kOfxStatOK){std::cerr<<"Instance failed\n";return 6;}
  // Confirm descriptors expose a real file picker, a stable Nuke preset,
  // and a visible manual default instead of silent empty black layers.
@@ -231,6 +261,16 @@ int main(){
  if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]!=64)return 30;
  if(std::abs(effect.parameters.params.at("ghost_blur")->props.doubles[kOfxParamPropDefault][0]-.003)>1e-9)return 31;
  if(!effect.parameters.params.count("lens_preset"))return 18;
+ // A strict OFX host rejects descriptor-time paramGetHandle. Properties
+ // must be assigned to the exact paramDefine descriptor returned handle.
+ auto& catalog=effect.parameters.params.at("lens_preset")->props.strings[kOfxParamPropChoiceOption];
+ if(catalog.size()!=1371 || catalog[1]!="AI_Nikkor_50mm_F1.2S.lens")return 40;
+ if(effect.parameters.params.at("gain")->props.strings[kOfxParamPropParent][0]!="nuke_ghost")return 41;
+ if(effect.parameters.params.at("fov_h")->props.strings[kOfxParamPropParent][0]!="nuke_camera")return 42;
+ auto& outputChoices=effect.parameters.params.at("output_format")->props.strings[kOfxParamPropChoiceOption];
+ if(outputChoices.size()!=3 || outputChoices[0]!="Flare as RGB"||
+    outputChoices[1]!="Sources Only"||outputChoices[2]!="Composite")return 43;
+
  if(effect.parameters.params.at("lens_preset")->props.ints[kOfxParamPropDefault][0]!=0)return 32;
  if(effect.parameters.params.at("lens_file")->props.strings[kOfxParamPropDefault][0]!="")return 33;
  if(effect.parameters.params.at("fov_auto_v")->props.ints[kOfxParamPropDefault][0]!=1)return 34;
@@ -267,6 +307,35 @@ int main(){
  if(std::abs(pt[0]-.75)>1e-8||std::abs(pt[1]-.25)>1e-8)return 26;
  effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault]={.5,.5};
  if(overlay(kOfxActionDestroyInstance,&mh,nullptr,nullptr)!=kOfxStatOK)return 27;
+ // Test portable DrawSuite V2, including the pointer-down transition from
+ // automatic Nuke detection to optional manual source control.
+ auto v2Ptr=effect.props.pointers.find(kOfxImageEffectPluginPropOverlayInteractV2);
+ if(v2Ptr==effect.props.pointers.end()||v2Ptr->second.empty()||!v2Ptr->second[0])return 46;
+ auto overlay2=reinterpret_cast<OfxPluginEntryPoint*>(v2Ptr->second[0]);
+ MockInteract mh2;
+ auto mp2=reinterpret_cast<OfxPropertySetHandle>(&mh2.props);
+ set_ptr(mp2,kOfxPropEffectInstance,0,&effect);
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=0;
+ effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault]={.5,.5};
+ if(overlay2(kOfxActionDescribe,&mh2,nullptr,nullptr)!=kOfxStatOK)return 47;
+ if(overlay2(kOfxActionCreateInstance,&mh2,nullptr,nullptr)!=kOfxStatOK)return 48;
+ int context_dummy=1;
+ set_ptr(aa,kOfxInteractPropDrawContext,0,&context_dummy);
+ set_double(aa,kOfxInteractPropPenPosition,0,32.0);
+ set_double(aa,kOfxInteractPropPenPosition,1,16.0);
+ draw_primitive_calls=0;
+ if(overlay2(kOfxInteractActionDraw,&mh2,aa,nullptr)!=kOfxStatOK||
+    draw_primitive_calls<4)return 49;
+ if(overlay2(kOfxInteractActionPenDown,&mh2,aa,nullptr)!=kOfxStatOK||
+    effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]!=1)
+   return 50;
+ set_double(aa,kOfxInteractPropPenPosition,0,16.0);
+ set_double(aa,kOfxInteractPropPenPosition,1,24.0);
+ if(overlay2(kOfxInteractActionPenMotion,&mh2,aa,nullptr)!=kOfxStatOK)return 51;
+ const auto& moved=effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault];
+ if(std::abs(moved[0]-.25)>1e-8||std::abs(moved[1]-.75)>1e-8)return 52;
+ if(overlay2(kOfxInteractActionPenUp,&mh2,aa,nullptr)!=kOfxStatOK)return 53;
+ if(overlay2(kOfxActionDestroyInstance,&mh2,nullptr,nullptr)!=kOfxStatOK)return 54;
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=0;
 #endif
 
@@ -274,19 +343,35 @@ int main(){
  const size_t sample=(size_t(16)*64+32)*4;
  source.pixels[sample]=80;source.pixels[sample+1]=90;source.pixels[sample+2]=100;
  for(size_t i=3;i<source.pixels.size();i+=4)source.pixels[i]=1.f;
- auto* mode=effect.parameters.params.at("output_mode").get();
- mode->props.ints[kOfxParamPropDefault][0]=5; // Sources Only
+ auto* mode=effect.parameters.params.at("output_format").get();
+ mode->props.ints[kOfxParamPropDefault][0]=1; // Sources Only
  Props args;set_double(reinterpret_cast<OfxPropertySetHandle>(&args),kOfxPropTime,0,0);
  for(int i=0;i<4;i++)set_int(reinterpret_cast<OfxPropertySetHandle>(&args),
     kOfxImageEffectPropRenderWindow,i,(i==2?64:(i==3?32:0)));
+ // Source diagnostics require no lens, and are the portable equivalent of
+ // the original Nuke Output Mode "Sources Only".
+ mode->props.ints[kOfxParamPropDefault][0]=1;
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK)return 55;
+ float sourcePeak=0;
+ for(size_t i=0;i<output.pixels.size();i+=4)
+   sourcePeak=std::max({sourcePeak,output.pixels[i],output.pixels[i+1],output.pixels[i+2]});
+ if(sourcePeak<2.f)return 56;
+ std::cout<<"No-lens Sources Only peak="<<sourcePeak<<"\n";
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  // Regression: a black opaque solid with Manual Position enabled must produce
  // a visible physical flare. This also exercises the bundled default lens.
  const float markerR=source.pixels[sample], markerG=source.pixels[sample+1],
              markerB=source.pixels[sample+2];
  source.pixels[sample]=source.pixels[sample+1]=source.pixels[sample+2]=0.f;
+ // No lens is the original Nuke initial state; it must not crash or
+ // leave a stale buffer. The optional Composite mode must preserve footage.
+ mode->props.ints[kOfxParamPropDefault][0]=2;
+ std::fill(output.pixels.begin(),output.pixels.end(),-777.f);
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK)
+   return 44;
+ if(output.pixels[sample]<-10.f || output.pixels[sample+3]!=1.f)return 45;
  effect.parameters.params.at("lens_preset")->props.ints[kOfxParamPropDefault][0]=1; // Nikkor
- mode->props.ints[kOfxParamPropDefault][0]=0; // Composite
+ mode->props.ints[kOfxParamPropDefault][0]=0; // Flare as RGB
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK) {
    std::cerr<<"Default black plate render failed\n";return 28;
  }
@@ -298,7 +383,7 @@ int main(){
  }
  std::cout<<"Default black plate flare energy="<<flare_energy<<"\n";
  source.pixels[sample]=markerR;source.pixels[sample+1]=markerG;source.pixels[sample+2]=markerB;
- mode->props.ints[kOfxParamPropDefault][0]=5;
+ mode->props.ints[kOfxParamPropDefault][0]=1;
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=0;
  std::fill(output.pixels.begin(),output.pixels.end(),0.f);
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
@@ -307,7 +392,7 @@ int main(){
  float peak=0;for(size_t i=0;i<output.pixels.size();i+=4)
    peak=std::max({peak,output.pixels[i],output.pixels[i+1],output.pixels[i+2]});
  if(!(peak>2.f&&std::isfinite(peak))){std::cerr<<"No bright source: "<<peak<<"\n";return 8;}
- mode->props.ints[kOfxParamPropDefault][0]=2; // Ghost Only
+ mode->props.ints[kOfxParamPropDefault][0]=0; // Flare as RGB
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]=64;
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
