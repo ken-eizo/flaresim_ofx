@@ -231,6 +231,13 @@ int main(){
  if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]!=64)return 30;
  if(std::abs(effect.parameters.params.at("ghost_blur")->props.doubles[kOfxParamPropDefault][0]-.003)>1e-9)return 31;
  if(!effect.parameters.params.count("lens_preset"))return 18;
+ if(effect.parameters.params.at("lens_preset")->props.ints[kOfxParamPropDefault][0]!=0)return 32;
+ if(effect.parameters.params.at("lens_file")->props.strings[kOfxParamPropDefault][0]!="")return 33;
+ if(effect.parameters.params.at("fov_auto_v")->props.ints[kOfxParamPropDefault][0]!=1)return 34;
+ if(effect.parameters.params.at("fov_use_sensor")->props.ints[kOfxParamPropDefault][0]!=0)return 35;
+ if(effect.parameters.params.at("nuke_spectral_quality")->props.ints[kOfxParamPropDefault][0]!=0)return 36;
+ if(effect.parameters.params.at("preview")->props.ints[kOfxParamPropDefault][0]!=0)return 37;
+
  auto& lensP=effect.parameters.params.at("lens_file")->props.strings;
  if(lensP[kOfxParamPropStringMode][0]!=kOfxParamStringIsFilePath)return 19;
 #if defined(_WIN32) || defined(__APPLE__)
@@ -278,6 +285,7 @@ int main(){
  const float markerR=source.pixels[sample], markerG=source.pixels[sample+1],
              markerB=source.pixels[sample+2];
  source.pixels[sample]=source.pixels[sample+1]=source.pixels[sample+2]=0.f;
+ effect.parameters.params.at("lens_preset")->props.ints[kOfxParamPropDefault][0]=1; // Nikkor
  mode->props.ints[kOfxParamPropDefault][0]=0; // Composite
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK) {
    std::cerr<<"Default black plate render failed\n";return 28;
@@ -333,6 +341,24 @@ int main(){
  if(cpu_sum>1.0 && diff_sum>cpu_sum*0.25){std::cerr<<"GPU parity failed\n";return 16;}
  std::cout<<"Ghost CPU L1="<<cpu_sum<<" GPU-preferred L1="<<gpu_sum
           <<" L1-diff="<<diff_sum<<"\n";
+ // AE Golden Angle is an appended (fourth) optional sampling mode, not a
+ // change to the original three Nuke sampling modes or their default.
+ const auto original=output.pixels;
+ effect.parameters.params.at("pupil_jitter")->props.ints[kOfxParamPropDefault][0]=3;
+ if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
+   std::cerr<<"Golden Angle optical render failed\n";return 38;
+ }
+ double goldenEnergy=0,goldenDelta=0;
+ for(size_t i=0;i<output.pixels.size();i+=4)for(int c=0;c<3;c++){
+   goldenEnergy+=std::abs(output.pixels[i+c]);
+   goldenDelta+=std::abs(double(output.pixels[i+c])-original[i+c]);
+ }
+ if(!(goldenEnergy>1e-4 && goldenDelta>1e-4)){
+   std::cerr<<"Golden Angle did not change optical sample distribution\n";return 39;
+ }
+ effect.parameters.params.at("pupil_jitter")->props.ints[kOfxParamPropDefault][0]=0;
+ std::cout<<"Golden Angle rendered, energy="<<goldenEnergy
+          <<" difference="<<goldenDelta<<"\n";
  if(call(kOfxActionDestroyInstance)!=kOfxStatOK)return 11;
  if(call(kOfxActionUnload)!=kOfxStatOK)return 12;
  std::cout<<"OFX mock-host sources + optical render OK\n";return 0;

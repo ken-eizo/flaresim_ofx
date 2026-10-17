@@ -25,8 +25,8 @@ if(MSVC)
   target_compile_options(FlareSimOptics PRIVATE /utf-8 /W3)
 endif()
 
-add_library(FlareSimOFX MODULE src/FlareSimOFX.cpp)
-target_include_directories(FlareSimOFX PRIVATE ${OFX_HEADERS})
+add_library(FlareSimOFX MODULE src/FlareSimOFX.cpp gpu/FlareSimNukeBridge.cpp)
+target_include_directories(FlareSimOFX PRIVATE ${OFX_HEADERS} gpu)
 if(WIN32 OR APPLE)
   target_sources(FlareSimOFX PRIVATE src/FlareSimOverlay.cpp)
   target_compile_definitions(FlareSimOFX PRIVATE FLARESIM_HAVE_OVERLAY=1)
@@ -146,7 +146,53 @@ if(APPLE)
 endif()
 
 include(CTest)
+if(FLARESIM_GPU_ENABLED AND WIN32)
+  # Compile Nuke's exact original ghost_cuda.cu in a separate DLL so
+  # its internal symbols cannot collide with the optimized AE/OFX CUDA code.
+  add_library(FlareSimNukeReference SHARED
+    vendor/nuke/src/ghost_cuda.cu
+    gpu/FlareSimNukeExport.cpp)
+  target_include_directories(FlareSimNukeReference PRIVATE
+    gpu "${NUKE_SRC}")
+  target_link_libraries(FlareSimNukeReference PRIVATE FlareSimOptics CUDA::cudart_static)
+  set_target_properties(FlareSimNukeReference PROPERTIES
+    CUDA_STANDARD 17 CUDA_ARCHITECTURES "75")
+  if(MSVC)
+    target_compile_options(FlareSimNukeReference PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+  endif()
+
+  set_target_properties(FlareSimNukeReference PROPERTIES
+    PREFIX "" OUTPUT_NAME "FlareSimNukeReference"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${FLARESIM_BUNDLE_ROOT}/Win64"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${FLARESIM_BUNDLE_ROOT}/Win64")
+  add_dependencies(FlareSimOFX FlareSimNukeReference)
+endif()
+if(BUILD_TESTING AND FLARESIM_GPU_ENABLED AND WIN32)
+  add_executable(FlareSimNukeGpuParityTest
+    tests/nuke_gpu_parity.cpp gpu/FlareLensGpu.cu gpu/FlareSimCuda.cu)
+  target_include_directories(FlareSimNukeGpuParityTest PRIVATE gpu)
+  target_link_libraries(FlareSimNukeGpuParityTest PRIVATE FlareSimOptics CUDA::cudart_static)
+  target_compile_definitions(FlareSimNukeGpuParityTest PRIVATE
+    FLARESIM_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    FLARESIM_NUKE_REFERENCE_BINARY="$<TARGET_FILE:FlareSimNukeReference>")
+  set_target_properties(FlareSimNukeGpuParityTest PROPERTIES
+    CUDA_STANDARD 17 CUDA_ARCHITECTURES "75")
+  if(MSVC)
+    target_compile_options(FlareSimNukeGpuParityTest PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+  endif()
+  add_dependencies(FlareSimNukeGpuParityTest FlareSimNukeReference)
+  add_test(NAME FlareSimNukeGpuParityTest COMMAND FlareSimNukeGpuParityTest)
+  set_tests_properties(FlareSimNukeGpuParityTest PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(BUILD_TESTING)
+  add_executable(FlareSimNukeBlurParityTest tests/nuke_blur_parity.cpp)
+  target_link_libraries(FlareSimNukeBlurParityTest PRIVATE FlareSimOptics)
+  if(MSVC)
+    target_compile_options(FlareSimNukeBlurParityTest PRIVATE /utf-8)
+  endif()
+  add_test(NAME FlareSimNukeBlurParityTest COMMAND FlareSimNukeBlurParityTest)
   add_executable(FlareSimCoreTest tests/core_test.cpp)
   target_link_libraries(FlareSimCoreTest PRIVATE FlareSimOptics)
   target_compile_definitions(FlareSimCoreTest PRIVATE FLARESIM_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")

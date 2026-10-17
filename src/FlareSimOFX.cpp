@@ -299,9 +299,10 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   group("nuke_ghost","Ghost",true);
   define_double(s,{"gain","Flare Gain",1000,0,1e7,"Nuke ghost intensity multiplier."});parent("gain","nuke_ghost");
   define_int(s,"ray_grid","Ray Grid (NxN)",64,2,2048,"Nuke entrance-pupil sample grid.");parent("ray_grid","nuke_ghost");
-  // Only the Nuke three jitter modes are exposed by default. The AE-only
-  // Vogel extension is intentionally not mixed into the canonical menu.
-  define_choice(s,"pupil_jitter","Pupil Jitter",0,{"Off","Stratified","Halton"});parent("pupil_jitter","nuke_ghost");
+  // Golden Angle (Vogel) is the optional AE extension, appended after the
+  // original Nuke modes; original mode indices and default Off remain intact.
+  define_choice(s,"pupil_jitter","Pupil Jitter",0,
+                {"Off","Stratified","Halton","Golden Angle (Vogel)"});parent("pupil_jitter","nuke_ghost");
   define_int(s,"jitter_seed","Jitter Seed",0,0,2147483647,"Nuke fixed stratified jitter seed.");parent("jitter_seed","nuke_ghost");
   define_boolean(s,"auto_seed","Auto Seed",1,"Seed from the current frame.");parent("auto_seed","nuke_ghost");
   define_double(s,{"threshold","Threshold",2,0,1e6,"Minimum source luminance in scene-linear RGB."});parent("threshold","nuke_ghost");
@@ -366,7 +367,7 @@ OfxStatus describe_context(OfxImageEffectHandle e){
 
   group("ofx_extensions","OFX Extensions",false);
   define_choice(s,"lens_preset","Bundled Lens Preset",0,{
-    "Nikkor 50mm f/1.2","Canon FD 50mm f/1.2L",
+    "None (Nuke default)","Nikkor 50mm f/1.2","Canon FD 50mm f/1.2L",
     "Leica Summilux 50mm f/1.4","ARRI Zeiss Master Prime 50mm T1.3",
     "Sony Planar 50mm f/1.4","Voigtlander Nokton 50mm f/1.0"
   });parent("lens_preset","ofx_extensions");
@@ -378,8 +379,8 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   prop->propSetDouble(q,kOfxParamPropDefault,1,.5);
   prop->propSetString(q,kOfxParamPropParent,0,"ofx_extensions");
   define_double(s,{"light_radiance","Manual Radiance",10,0,1e6,"Intensity of the OFX-only manual source."});parent("light_radiance","ofx_extensions");
-  define_choice(s,"render_backend","Optical Renderer",0,{"Auto (GPU preferred)","CPU","GPU (fallback CPU)"});parent("render_backend","ofx_extensions");
-  define_int(s,"max_pairs","Max Ghost Pairs",2000,1,2000,"OFX resource/safety limit; unlike Nuke's individually enabled pair checkboxes.");parent("max_pairs","ofx_extensions");
+  define_choice(s,"render_backend","Optical Renderer",0,{"Auto (Nuke fidelity)","CPU (Reference)","GPU (Fast)"});parent("render_backend","ofx_extensions");
+  define_int(s,"max_pairs","Max Ghost Pairs",65535,1,65535,"OFX resource/safety limit; unlike Nuke's individually enabled pair checkboxes.");parent("max_pairs","ofx_extensions");
 
   // Preserve historical preview parameter identifiers, but keep the two
   // synonymous, obsolete fields out of the canonical Nuke UI.
@@ -419,9 +420,13 @@ std::vector<float> haze_layer(const std::vector<float>& rgb,int w,int h,
   std::vector<float> haze(size_t(w)*h*3,0);
   if(gain<=0)return haze;
   const int ds=std::clamp(options.downsample,1,32);
-  for(int by=0;by<h;by+=ds)for(int bx=0;bx<w;bx+=ds) {
+  const int dw=std::max(1,w/ds),dh=std::max(1,h/ds);
+  for(int byidx=0;byidx<dh;++byidx)for(int bxidx=0;bxidx<dw;++bxidx) {
+    const int by=byidx*ds,bx=bxidx*ds;
+    const int readY=byidx==dh-1?h:std::min(h,by+ds);
+    const int readX=bxidx==dw-1?w:std::min(w,bx+ds);
     double r=0,g=0,b=0,mask_sum=0;int count=0;
-    for(int y=by;y<std::min(h,by+ds);++y)for(int x=bx;x<std::min(w,bx+ds);++x){
+    for(int y=by;y<readY;++y)for(int x=bx;x<readX;++x){
       size_t i=(size_t(y)*w+x)*3;r+=rgb[i];g+=rgb[i+1];b+=rgb[i+2];
       mask_sum+=mask?std::clamp((*mask)[size_t(y)*w+x],0.f,1.f):1.0f;
       ++count;
@@ -511,20 +516,27 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       }
     }
   }
-  std::vector<fl::Source> sources;
-  if(integer(d,"source_mode",time,0)==1){
-    const auto point=point_param(d,"light_position",time);
-    const float v=float(number(d,"light_radiance",time,10));
-    sources.push_back({float(point[0]),float(point[1]),v,v,v});
-  }else{
-    sources=fl::ofx::detect_sources(src_rgb,w,h,detect,
-           mask_values.empty()?nullptr:&mask_values);
-  }
   fl::Settings settings{};
   settings.fov_h_deg=float(number(d,"fov_h",time,40));
-  settings.fov_v_deg=float(number(d,"fov_v",time,0));
+  settings.fov_v_deg=float(number(d,"fov_v",time,24));
+  // Nuke's sensor mode computes optical FOV from physical sensor dimensions.
+  const int preset=integer(d,"sensor_preset",time,0);
+  const float sensorW[]={0.f,36.f,24.89f,22.3f,23.5f,17.3f};
+  const float sensorH[]={0.f,24.f,18.66f,14.9f,15.6f,13.f};
+  const float sw=preset>=1&&preset<=5?sensorW[preset]:
+                    float(number(d,"sensor_w",time,36));
+  const float sh=preset>=1&&preset<=5?sensorH[preset]:
+                    float(number(d,"sensor_h",time,24));
+  if(integer(d,"fov_use_sensor",time,0)!=0){
+    const float f=std::max(.1f,float(number(d,"focal_length",time,50)));
+    settings.fov_h_deg=2.f*180.f/pi*std::atan(sw/(2*f));
+    settings.fov_v_deg=2.f*180.f/pi*std::atan(sh/(2*f));
+  }else if(integer(d,"fov_auto_v",time,1)!=0){
+    settings.fov_v_deg=2.f*180.f/pi*std::atan(
+      std::tan(settings.fov_h_deg*pi/360.f)*float(h)/float(w));
+  }
   settings.grid=grid;settings.spectral_samples=spectral;
-  settings.max_pairs=integer(d,"max_pairs",time,2000);
+  settings.max_pairs=integer(d,"max_pairs",time,65535);
   settings.gain=float(number(d,"gain",time,1000));
   if(preview && integer(d,"source_mode",time,0)==0) {
     const float ds=float(std::max(1,detect.downsample));
@@ -535,10 +547,23 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   settings.aperture_rotation_deg=float(number(d,"aperture_rotation",time,0));
   settings.pupil_jitter=integer(d,"pupil_jitter",time,0);
   settings.jitter_seed=integer(d,"auto_seed",time,1)?
-        int(std::fmod(std::abs(time),2147483647.)):integer(d,"jitter_seed",time,0);
+        int(std::clamp(time,double(std::numeric_limits<int>::min()),
+                             double(std::numeric_limits<int>::max()))):
+        integer(d,"jitter_seed",time,0);
   settings.pair_mode=integer(d,"pair_mode",time,0);
   settings.pair_surface_a=integer(d,"surface_a",time,0);
   settings.pair_surface_b=integer(d,"surface_b",time,1);
+  detect.fov_h_deg=settings.fov_h_deg;
+  detect.fov_v_deg=settings.fov_v_deg;
+  std::vector<fl::Source> sources;
+  if(integer(d,"source_mode",time,0)==1){
+    const auto point=point_param(d,"light_position",time);
+    const float v=float(number(d,"light_radiance",time,10));
+    sources.push_back({float(point[0]),float(point[1]),v,v,v});
+  }else{
+    sources=fl::ofx::detect_sources(src_rgb,w,h,detect,
+           mask_values.empty()?nullptr:&mask_values);
+  }
   const float fov_v=settings.fov_v_deg>0?settings.fov_v_deg:
     2.f*180.f/pi*std::atan(std::tan(settings.fov_h_deg*pi/360.f)*h/float(w));
   const bool need_ghost=effectiveMode==0||effectiveMode==1||effectiveMode==2;
@@ -553,16 +578,22 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       const int preset=integer(d,"lens_preset",time,0);
       const std::string legacy=string_param(d,"lens_name",time);
       // Preserve previous preview projects that manually entered an exact name.
-      const std::string name=legacy!=kLensDefault && preset==0?
-        legacy:kPresetFiles[std::clamp(preset,0,int(std::size(kPresetFiles))-1)];
-      // Bundled presets must never escape the immutable resource folder.
-      if(name.find('/')!=std::string::npos||name.find('\\')!=std::string::npos||
-         name.empty()||name=="."||name=="..")return kOfxStatErrValue;
-      path=lens_directory()/fs::u8path(name);
+      // No prescription selected is Nuke's true initial state. This is
+      // distinct from a missing or corrupt explicit lens file.
+      if(preset==0 && legacy==kLensDefault) {
+        path.clear();
+      }else{
+        const std::string name=legacy!=kLensDefault && preset==0?
+          legacy:kPresetFiles[std::clamp(preset-1,0,int(std::size(kPresetFiles))-1)];
+        if(name.find('/')!=std::string::npos||name.find('\\')!=std::string::npos||
+           name.empty()||name=="."||name=="..")return kOfxStatErrValue;
+        path=lens_directory()/fs::u8path(name);
+      }
     }
-    auto lens=load_lens(path);
+    auto lens=path.empty()?std::shared_ptr<const LensSystem>{}:load_lens(path);
     if(!lens){
-      std::fprintf(stderr,"FlareSim OFX: failed to open lens: %s\n",path.string().c_str());
+      if(!path.empty())
+        std::fprintf(stderr,"FlareSim OFX: failed to open lens: %s\n",path.string().c_str());
       // A missing lens must NEVER silently substitute a different one, but a
       // failed effect must not turn the source clip into an opaque black plate.
       // Instead pass through the original source in Composite mode.
@@ -578,12 +609,27 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
     const int passes=integer(d,"ghost_blur_passes",time,3);
     const int backend=integer(d,"render_backend",time,0);
     bool gpu_rendered=false;
+    bool nuke_reference_used=false;
     if(backend!=1 && fl::ofxgpu::available()) {
-      gpu_rendered=fl::ofxgpu::render_ghosts(*lens,sources,settings,w,h,blur,passes,emitted);
+      // Faithful default: compile and call the UNMODIFIED upstream Nuke
+      // ghost_cuda.cu from an isolated DLL on CUDA hosts. AE Golden Angle
+      // (method 3) deliberately uses the extended GPU sampler instead.
+      if(settings.pupil_jitter<=2)
+        gpu_rendered=nuke_reference_used=fl::ofxgpu::render_nuke_reference(
+           path.string(),sources,settings,w,h,blur,passes,emitted);
+      // Golden Angle (AE extension) deliberately uses the fast GPU kernel.
+      // For Nuke Off/Stratified/Halton, Auto falls back to the closer CPU
+      // optical path if the EXACT original Nuke CUDA reference is absent.
+      // This preserves predictable fidelity on macOS/CPU-only OFX hosts;
+      // users may select GPU (Fast) explicitly to prefer CUDA/Metal speed.
+      if(!gpu_rendered && (backend==2 || settings.pupil_jitter==3))
+        gpu_rendered=fl::ofxgpu::render_ghosts(*lens,sources,settings,w,h,blur,passes,emitted);
     }
     if(std::getenv("FLARESIM_GPU_TRACE"))
       std::fprintf(stderr,"FlareSimOFX optical renderer: %s (%zu sources, grid %d)\n",
-                   gpu_rendered?"GPU":"CPU",sources.size(),settings.grid);
+                   nuke_reference_used?"Nuke original CUDA":
+                   gpu_rendered?"AE extended GPU":"CPU",
+                   sources.size(),settings.grid);
     if(!gpu_rendered){
       const auto ghost=fl::render_sources_parallel(*lens,sources,settings,w,h,
                        {&abort_requested,e},4);
@@ -609,10 +655,14 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   }
   if(effectiveMode==5) {
     std::fill(emitted.begin(),emitted.end(),0.f);
+    const int ds=std::clamp(detect.downsample,1,32);
     for(const auto& s:sources){
-      const int x=std::clamp(int(s.x*w),0,w-1),y=std::clamp(int(s.y*h),0,h-1);
-      const size_t i=(size_t(y)*w+x)*3;
-      emitted[i]+=s.r;emitted[i+1]+=s.g;emitted[i+2]+=s.b;
+      const int cx=int(s.x*w),cy=int(s.y*h);
+      for(int y=std::max(0,cy-ds/2);y<std::min(h,cy-ds/2+ds);++y)
+        for(int x=std::max(0,cx-ds/2);x<std::min(w,cx-ds/2+ds);++x){
+          const size_t i=(size_t(y)*w+x)*3;
+          emitted[i]=s.r;emitted[i+1]=s.g;emitted[i+2]=s.b;
+        }
     }
   }
   // Non-tile effect: image dimensions are the full source image.
