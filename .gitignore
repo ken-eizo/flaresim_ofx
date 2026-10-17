@@ -1,0 +1,17 @@
+/build/
+/build-*/
+/out/
+/.vs/
+/.idea/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.exp
+*.lib
+*.dll
+*.ofx
+*.zip
+__pycache__/
+.DS_Store
