@@ -20,7 +20,7 @@ The same physical lens file is always selected explicitly. A bad file MUST fail 
 | `src/SourceDetection.*` | New | Host-neutral, Nuke-style block luminance detection |
 | `src/FlareSimOFX.cpp` | New | Standard OFX C ABI, host mapping and pipeline |
 | `vendor/openfx/include` | AcademySoftwareFoundation | Official OpenFX C API |
-| `tests/*` | New | Standalone core and ABI smoke tests |
+| `tests/*` | New | Standalone core, catalog, ABI, and synthetic OFX host render tests |
 
 No `Nuke NDK`, `AE SDK`, Qt, proprietary Resolve APIs, or a specific host binary is linked by the OFX target.
 

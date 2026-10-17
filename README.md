@@ -46,7 +46,7 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 ## Status and caveats
 
-- Windows x64: CMake Release build and basic C ABI + CPU optical tests pass.
+- Windows x64: CMake Release build and four standalone tests pass (optics, all 1,370 lens prescriptions, C ABI exports, and a synthetic OFX host render).
 - macOS/Linux: source/CMake portability targeted, not yet built or tested.
 - Hosts: DaVinci Resolve, Fusion, Natron, Nuke, and others **must be verified individually**. An OFX API plugin is not guaranteed to work in every host/version.
 - GPU: CPU-only. This can be very slow with many light sources, reflection pairs, or high Ray Grid. Set Preview Mode and limit sources for now.
