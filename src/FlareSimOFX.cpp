@@ -45,6 +45,7 @@ OfxParameterSuiteV1* params=nullptr;
 constexpr const char* ID="dev.keneizo.FlareSimOFX";
 constexpr const char* kSource=kOfxImageEffectSimpleSourceClipName;
 constexpr const char* kOutput=kOfxImageEffectOutputClipName;
+constexpr const char* kMask="Mask";
 constexpr float pi=3.14159265358979323846f;
 constexpr const char* kLensDefault="AI_Nikkor_50mm_F1.2S.lens";
 constexpr const char* kPresetFiles[]{
@@ -57,7 +58,7 @@ constexpr const char* kPresetFiles[]{
 };
 
 struct Instance {
-  OfxImageClipHandle source=nullptr, output=nullptr;
+  OfxImageClipHandle source=nullptr, output=nullptr, mask=nullptr;
   OfxParamSetHandle pset=nullptr;
 };
 struct Image {
@@ -78,7 +79,8 @@ struct Image {
     if(prop->propGetString(props,kOfxImageEffectPropComponents,0,&comp)!=kOfxStatOK)return false;
     if(prop->propGetString(props,kOfxImageEffectPropPixelDepth,0,&depth)!=kOfxStatOK)return false;
     channels=comp&&strcmp(comp,kOfxImageComponentRGBA)==0?4:
-             comp&&strcmp(comp,kOfxImageComponentRGB)==0?3:0;
+             comp&&strcmp(comp,kOfxImageComponentRGB)==0?3:
+             comp&&strcmp(comp,kOfxImageComponentAlpha)==0?1:0;
     if(depth&&strcmp(depth,kOfxBitDepthFloat)==0){bytes=4;isfloat=true;}
     else if(depth&&strcmp(depth,kOfxBitDepthShort)==0){bytes=2;}
     else if(depth&&strcmp(depth,kOfxBitDepthByte)==0){bytes=1;}
@@ -262,73 +264,136 @@ OfxStatus describe_context(OfxImageEffectHandle e){
     prop->propSetString(p,kOfxImageEffectPropSupportedComponents,0,kOfxImageComponentRGBA);
     prop->propSetString(p,kOfxImageEffectPropSupportedComponents,1,kOfxImageComponentRGB);
   }
+  if(fx->clipDefine(e,kMask,&p)==kOfxStatOK&&p){
+    prop->propSetString(p,kOfxImageEffectPropSupportedComponents,0,kOfxImageComponentAlpha);
+    prop->propSetInt(p,kOfxImageClipPropOptional,0,1);
+  }
   OfxParamSetHandle s=nullptr;
   if(fx->getParamSet(e,&s)!=kOfxStatOK)return kOfxStatFailed;
-  define_choice(s,"lens_preset","Lens Preset",0,{
+
+  // Nuke: Lens File is the first control, a native file browser.
+  define_string(s,"lens_file","Lens File","",
+                "Nuke .lens prescription. Empty uses the bundled Lens Preset in OFX Extensions.");
+  OfxParamHandle unused_handle=nullptr;
+  OfxPropertySetHandle file_props=nullptr;
+  params->paramGetHandle(s,"lens_file",&unused_handle,&file_props);
+  if(file_props){
+    prop->propSetString(file_props,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);
+    prop->propSetInt(file_props,kOfxParamPropStringFilePathExists,0,1);
+  }
+
+  // Nuke knob sections, defined in the same order as FlareSim.cpp.
+  auto group=[&](const char* name,const char* label,bool opened){
+    OfxPropertySetHandle g=nullptr;
+    if(params->paramDefine(s,kOfxParamTypeGroup,name,&g)==kOfxStatOK&&g){
+      prop->propSetString(g,kOfxPropLabel,0,label);
+      prop->propSetInt(g,kOfxParamPropGroupOpen,0,opened?1:0);
+    }
+  };
+  auto parent=[&](const char* name,const char* groupName){
+    OfxParamHandle v=nullptr;OfxPropertySetHandle p=nullptr;
+    if(params->paramGetHandle(s,name,&v,&p)==kOfxStatOK&&p)
+      prop->propSetString(p,kOfxParamPropParent,0,groupName);
+  };
+
+  group("nuke_ghost","Ghost",true);
+  define_double(s,{"gain","Flare Gain",1000,0,1e7,"Nuke ghost intensity multiplier."});parent("gain","nuke_ghost");
+  define_int(s,"ray_grid","Ray Grid (NxN)",64,2,2048,"Nuke entrance-pupil sample grid.");parent("ray_grid","nuke_ghost");
+  // Only the Nuke three jitter modes are exposed by default. The AE-only
+  // Vogel extension is intentionally not mixed into the canonical menu.
+  define_choice(s,"pupil_jitter","Pupil Jitter",0,{"Off","Stratified","Halton"});parent("pupil_jitter","nuke_ghost");
+  define_int(s,"jitter_seed","Jitter Seed",0,0,2147483647,"Nuke fixed stratified jitter seed.");parent("jitter_seed","nuke_ghost");
+  define_boolean(s,"auto_seed","Auto Seed",1,"Seed from the current frame.");parent("auto_seed","nuke_ghost");
+  define_double(s,{"threshold","Threshold",2,0,1e6,"Minimum source luminance in scene-linear RGB."});parent("threshold","nuke_ghost");
+  define_double(s,{"source_cap","Source Cap",0,0,1e6,"0 means no cap."});parent("source_cap","nuke_ghost");
+  define_int(s,"max_sources","Max Sources",512,0,8192,"0 means unlimited up to a safety cap.");parent("max_sources","nuke_ghost");
+  define_int(s,"downsample","Downsample",4,1,32,"Nuke block source detection stride.");parent("downsample","nuke_ghost");
+  define_int(s,"cluster_radius","Cluster Radius",0,0,256,"Merge nearby bright sources in pixels.");parent("cluster_radius","nuke_ghost");
+
+  group("nuke_preview","Preview Mode",false);
+  define_boolean(s,"preview","Enable Preview Mode",0,"Temporarily override quality controls.");parent("preview","nuke_preview");
+  define_int(s,"preview_grid","Ray Grid (NxN)",16,2,2048,"Preview ray grid.");parent("preview_grid","nuke_preview");
+  define_int(s,"preview_max_sources","Max Sources",100,0,8192,"Preview source count.");parent("preview_max_sources","nuke_preview");
+  define_int(s,"preview_downsample","Downsample",8,1,32,"Preview source stride.");parent("preview_downsample","nuke_preview");
+  define_choice(s,"preview_spectral","Spectral Samples",0,{"3 (R/G/B)","5","7","9","11"});parent("preview_spectral","nuke_preview");
+
+  group("nuke_camera","Camera",false);
+  define_boolean(s,"fov_use_sensor","Use Sensor Size",0,"Compute FOV using focal length and sensor size.");parent("fov_use_sensor","nuke_camera");
+  define_choice(s,"sensor_preset","Sensor Preset",0,{"Custom","Full Frame","Super 35","APS-C Canon","APS-C Nikon/Sony","Micro Four Thirds"});parent("sensor_preset","nuke_camera");
+  define_double(s,{"fov_h","FOV H (deg)",40,1,180,"Nuke horizontal field of view."});parent("fov_h","nuke_camera");
+  define_boolean(s,"fov_auto_v","Auto FOV V",1,"Derive vertical FOV from horizontal FOV and aspect ratio.");parent("fov_auto_v","nuke_camera");
+  define_double(s,{"fov_v","FOV V (deg)",24,1,180,"Manual vertical FOV, used when Auto FOV V is disabled."});parent("fov_v","nuke_camera");
+  define_double(s,{"sensor_w","Sensor Width (mm)",36,1,100,"Sensor width."});parent("sensor_w","nuke_camera");
+  define_double(s,{"sensor_h","Sensor Height (mm)",24,1,100,"Sensor height."});parent("sensor_h","nuke_camera");
+  define_double(s,{"focal_length","Focal Length (mm)",50,1,2000,"Lens focal length."});parent("focal_length","nuke_camera");
+
+  group("nuke_aperture","Aperture",false);
+  define_int(s,"aperture_blades","Aperture Blades",0,0,16,"0 round; 3..16 polygon.");parent("aperture_blades","nuke_aperture");
+  define_double(s,{"aperture_rotation","Aperture Rotation",0,-180,180,"Degrees."});parent("aperture_rotation","nuke_aperture");
+
+  group("nuke_spectral","Spectral",false);
+  define_choice(s,"nuke_spectral_quality","Spectral Samples",0,{"3 (R/G/B)","5","7","9","11"});parent("nuke_spectral_quality","nuke_spectral");
+
+  group("nuke_post","Post-process",false);
+  define_double(s,{"ghost_blur","Ghost Blur",.003,0,.25,"Nuke blur as a fraction of frame diagonal."});parent("ghost_blur","nuke_post");
+  define_int(s,"ghost_blur_passes","Ghost Blur Passes",3,0,8,"Nuke separable box blur passes.");parent("ghost_blur_passes","nuke_post");
+  define_double(s,{"haze_gain","Haze Gain",0,0,1e5,"Veiling glare intensity."});parent("haze_gain","nuke_post");
+  define_double(s,{"haze_radius","Haze Radius",.15,0,.5,"Diagonal fraction."});parent("haze_radius","nuke_post");
+  define_int(s,"haze_passes","Haze Blur Passes",3,0,8,"Nuke box blur passes.");parent("haze_passes","nuke_post");
+
+  group("nuke_star","Starburst",false);
+  define_double(s,{"starburst_gain","Starburst Gain",0,0,1e5,"Fraunhofer diffraction intensity."});parent("starburst_gain","nuke_star");
+  define_double(s,{"starburst_scale","Starburst Scale",.15,0,1,"Diffraction radius relative to diagonal."});parent("starburst_scale","nuke_star");
+
+  group("nuke_diagnostics","Diagnostics",false);
+  define_boolean(s,"show_sources","Show Sources",0,"Show the source map for tuning detection.");parent("show_sources","nuke_diagnostics");
+
+  group("nuke_output","Output",true);
+  // Nuke writes flare/source/haze/starburst to arbitrary named channels.
+  // Standard OFX cannot promise this across every host; expose the mapped
+  // RGB outputs explicitly, and keep v0.1 preview values stable.
+  define_choice(s,"output_mode","Output Mode",0,{
+    "Composite (OFX)","Flare Only","Ghost Only",
+    "Haze Only","Starburst Only","Sources Only"
+  });parent("output_mode","nuke_output");
+
+  group("nuke_pairs","Pairs",false);
+  // The existing OFX single-pair selection remains optional; Nuke's full
+  // list of on/off toggles requires a separate host-independent port.
+  define_choice(s,"pair_mode","Pair Selection",0,{"All","Only Selected","Exclude Selected"});parent("pair_mode","nuke_pairs");
+  define_int(s,"surface_a","Pair Surface A",0,0,256,"Zero-based first optical surface.");parent("surface_a","nuke_pairs");
+  define_int(s,"surface_b","Pair Surface B",1,0,256,"Zero-based second optical surface.");parent("surface_b","nuke_pairs");
+
+  group("ofx_extensions","OFX Extensions",false);
+  define_choice(s,"lens_preset","Bundled Lens Preset",0,{
     "Nikkor 50mm f/1.2","Canon FD 50mm f/1.2L",
     "Leica Summilux 50mm f/1.4","ARRI Zeiss Master Prime 50mm T1.3",
     "Sony Planar 50mm f/1.4","Voigtlander Nokton 50mm f/1.0"
-  });
-  // The original Nuke catalog (1370 files) is bundled unchanged.
-  // File path mode lets OFX hosts supply a real native file browser instead
-  // of forcing users to enter .lens paths manually.
-  define_string(s,"lens_file","Lens File (Optional)","",
-                "Browse for any .lens file, including bundled ones. Empty = Lens Preset.");
-  OfxParamHandle unused_handle=nullptr;
-  OfxPropertySetHandle lens_file_props=nullptr;
-  params->paramGetHandle(s,"lens_file",&unused_handle,&lens_file_props);
-  if(lens_file_props){
-    prop->propSetString(lens_file_props,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);
-    prop->propSetInt(lens_file_props,kOfxParamPropStringFilePathExists,0,1);
-  }
-  // Keep the legacy identifier hidden so projects saved with preview v0.1.0
-  // still load without silently losing their previous lens name.
-  define_string(s,"lens_name","Legacy Lens Name",kLensDefault,
-                "Legacy exact filename; Lens File and Lens Preset take precedence.");
-  OfxPropertySetHandle legacy_props=nullptr;
-  params->paramGetHandle(s,"lens_name",&unused_handle,&legacy_props);
-  if(legacy_props)prop->propSetInt(legacy_props,kOfxParamPropSecret,0,1);
-  define_choice(s,"source_mode","Light Sources",1,{"Detect Highlights","Manual Position"});
+  });parent("lens_preset","ofx_extensions");
+  define_choice(s,"source_mode","Source Mode (OFX)",0,{"Detect Highlights (Nuke)","Manual Position (OFX)"});parent("source_mode","ofx_extensions");
   OfxPropertySetHandle q=nullptr;
   params->paramDefine(s,kOfxParamTypeDouble2D,"light_position",&q);
-  prop->propSetString(q,kOfxPropLabel,0,"Light Position (0..1)");
+  prop->propSetString(q,kOfxPropLabel,0,"Light Position");
   prop->propSetDouble(q,kOfxParamPropDefault,0,.5);
   prop->propSetDouble(q,kOfxParamPropDefault,1,.5);
-  define_double(s,{"light_radiance","Manual Radiance",10,0,1e6,"Intensity for manual light source in linear RGB."});
-  define_double(s,{"fov_h","FOV Horizontal",40,1,150,"Field of view in degrees."});
-  define_double(s,{"fov_v","FOV Vertical (0=Auto)",0,0,150,"0 derives vertical FOV from aspect ratio."});
-  define_double(s,{"threshold","Threshold",2,0,1e6,"Source detection luminance threshold in scene-linear RGB."});
-  define_double(s,{"source_cap","Source Cap",0,0,1e6,"0 disables cap; see original Nuke."});
-  define_int(s,"downsample","Downsample",4,1,32,"Block size of Nuke highlight extraction.");
-  define_int(s,"max_sources","Max Sources",512,1,8192,"Highest luminance samples kept.");
-  define_int(s,"cluster_radius","Cluster Radius (px)",0,0,256,"Optional Nuke light clustering.");
-  define_double(s,{"gain","Flare Gain",1000,0,1e7,"Original Nuke-style ghost multiplier."});
-  define_int(s,"ray_grid","Ray Grid",32,2,2048,"Samples per pupil axis; quadratic render cost." );
-  define_int(s,"max_pairs","Max Ghost Pairs",40,1,2000,"Limit optical reflection pairs." );
-  define_int(s,"spectral_samples","Spectral Samples",3,3,11,"Wavelengths sampled per optical path." );
-  define_int(s,"aperture_blades","Aperture Blades",0,0,16,"0 is round, 3..16 polygonal." );
-  define_double(s,{"aperture_rotation","Aperture Rotation",0,-360,360,"Orientation in degrees."});
-  define_choice(s,"pupil_jitter","Pupil Jitter",0,{"Off","Stratified","Halton","Vogel"});
-  define_int(s,"jitter_seed","Jitter Seed",0,0,2147483647,"Seed for stratified sampling.");
-  define_boolean(s,"auto_seed","Auto Seed",1,"Use frame time as sampling seed.");
-  define_choice(s,"pair_mode","Ghost Pair Selection",0,{"All","Only Selected","Exclude Selected"});
-  define_int(s,"surface_a","Pair Surface A",0,0,256,"First zero-based reflecting optical surface.");
-  define_int(s,"surface_b","Pair Surface B",1,0,256,"Second zero-based reflecting optical surface.");
-  define_double(s,{"ghost_blur","Ghost Blur",0,0,.25,"Image-diagonal fraction as in Nuke."});
-  define_int(s,"ghost_blur_passes","Ghost Blur Passes",3,0,8,"Separable box blur passes.");
-  define_double(s,{"haze_gain","Haze Gain",0,0,1e5,"Scattered-light layer brightness."});
-  define_double(s,{"haze_radius","Haze Radius",.15,0,.5,"Image-diagonal fraction."});
-  define_int(s,"haze_passes","Haze Blur Passes",3,0,8,"Haze blur passes.");
-  define_double(s,{"starburst_gain","Starburst Gain",0,0,1e5,"Physical Fraunhofer diffraction gain."});
-  define_double(s,{"starburst_scale","Starburst Scale",.15,0,1,"Image-diagonal fraction."});
-  define_choice(s,"render_backend","Optical Renderer",0,{"Auto (GPU preferred)","CPU","GPU (fallback CPU)"});
-  define_choice(s,"output_mode","Output Mode",0,
-    {"Composite","Flare Only","Ghost Only","Haze Only","Starburst Only","Sources Only"});
-  define_boolean(s,"preview","Preview Mode",0,"Use reduced preview sample settings.");
-  define_int(s,"preview_grid","Preview Ray Grid",16,2,2048,"Fast interactive quality.");
-  define_int(s,"preview_max_sources","Preview Max Sources",100,1,8192,"Preview workload limit.");
-  define_int(s,"preview_downsample","Preview Downsample",8,1,32,"Preview source scan resolution.");
-  define_int(s,"preview_spectral","Preview Spectral Samples",3,3,11,"Preview wavelength count.");
+  prop->propSetString(q,kOfxParamPropParent,0,"ofx_extensions");
+  define_double(s,{"light_radiance","Manual Radiance",10,0,1e6,"Intensity of the OFX-only manual source."});parent("light_radiance","ofx_extensions");
+  define_choice(s,"render_backend","Optical Renderer",0,{"Auto (GPU preferred)","CPU","GPU (fallback CPU)"});parent("render_backend","ofx_extensions");
+  define_int(s,"max_pairs","Max Ghost Pairs",2000,1,2000,"OFX resource/safety limit; unlike Nuke's individually enabled pair checkboxes.");parent("max_pairs","ofx_extensions");
+
+  // Preserve historical preview parameter identifiers, but keep the two
+  // synonymous, obsolete fields out of the canonical Nuke UI.
+  define_string(s,"lens_name","Legacy Lens Name",kLensDefault,"Legacy OFX preview prescription.");
+  OfxPropertySetHandle legacy=nullptr;
+  params->paramGetHandle(s,"lens_name",&unused_handle,&legacy);
+  if(legacy)prop->propSetInt(legacy,kOfxParamPropSecret,0,1);
+  define_int(s,"spectral_samples","Legacy Spectral Samples",3,3,11,"Old preview integer value.");
+  params->paramGetHandle(s,"spectral_samples",&unused_handle,&legacy);
+  if(legacy)prop->propSetInt(legacy,kOfxParamPropSecret,0,1);
+  define_int(s,"preview_spectral_legacy","Legacy Preview Spectral",3,3,11,"For legacy export.");
+  params->paramGetHandle(s,"preview_spectral_legacy",&unused_handle,&legacy);
+  if(legacy)prop->propSetInt(legacy,kOfxParamPropSecret,0,1);
+
   return kOfxStatOK;
 }
 OfxStatus create_instance(OfxImageEffectHandle e){
@@ -336,6 +401,8 @@ OfxStatus create_instance(OfxImageEffectHandle e){
   if(fx->clipGetHandle(e,kSource,&p->source,nullptr)!=kOfxStatOK||
      fx->clipGetHandle(e,kOutput,&p->output,nullptr)!=kOfxStatOK||
      fx->getParamSet(e,&p->pset)!=kOfxStatOK)return kOfxStatFailed;
+  // A host may decline to define the optional mask clip; that is not fatal.
+  fx->clipGetHandle(e,kMask,&p->mask,nullptr);
   OfxPropertySetHandle effect=nullptr;fx->getPropertySet(e,&effect);
   prop->propSetPointer(effect,kOfxPropInstanceData,0,p.get());p.release();
   return kOfxStatOK;
@@ -347,14 +414,17 @@ OfxStatus destroy_instance(OfxImageEffectHandle e){
 }
 std::vector<float> haze_layer(const std::vector<float>& rgb,int w,int h,
                              const fl::ofx::DetectionOptions& options,
-                             float gain,float radius,int passes){
+                             float gain,float radius,int passes,
+                             const std::vector<float>* mask){
   std::vector<float> haze(size_t(w)*h*3,0);
   if(gain<=0)return haze;
   const int ds=std::clamp(options.downsample,1,32);
   for(int by=0;by<h;by+=ds)for(int bx=0;bx<w;bx+=ds) {
-    double r=0,g=0,b=0;int count=0;
+    double r=0,g=0,b=0,mask_sum=0;int count=0;
     for(int y=by;y<std::min(h,by+ds);++y)for(int x=bx;x<std::min(w,bx+ds);++x){
-      size_t i=(size_t(y)*w+x)*3;r+=rgb[i];g+=rgb[i+1];b+=rgb[i+2];++count;
+      size_t i=(size_t(y)*w+x)*3;r+=rgb[i];g+=rgb[i+1];b+=rgb[i+2];
+      mask_sum+=mask?std::clamp((*mask)[size_t(y)*w+x],0.f,1.f):1.0f;
+      ++count;
     }
     if(!count)continue;
     r/=count;g/=count;b/=count;
@@ -362,6 +432,8 @@ std::vector<float> haze_layer(const std::vector<float>& rgb,int w,int h,
     if(options.source_cap>0 && lum>options.source_cap){
       double k=options.source_cap/lum;r*=k;g*=k;b*=k;lum=options.source_cap;
     }
+    const double mask_weight=mask_sum/count;
+    r*=mask_weight;g*=mask_weight;b*=mask_weight;lum*=mask_weight;
     if(lum<options.threshold)continue;
     for(int y=by;y<std::min(h,by+ds);++y)for(int x=bx;x<std::min(w,bx+ds);++x){
       size_t i=(size_t(y)*w+x)*3;haze[i]=float(r);haze[i+1]=float(g);haze[i+2]=float(b);
@@ -404,9 +476,11 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   if(w<1||h<1||w>16384||h>16384||size_t(w)*h>size_t(16384)*16384)return kOfxStatErrImageFormat;
   if(fx->abort(e))return kOfxStatReplyDefault;
   const int mode=integer(d,"output_mode",time,0);
+  // OFX host portability: Nuke's named source.rgb diagnostic is previewed in RGB.
+  const int effectiveMode=integer(d,"show_sources",time,0)!=0?5:mode;
   const bool preview=integer(d,"preview",time,0)!=0;
-  const int grid=preview?integer(d,"preview_grid",time,16):integer(d,"ray_grid",time,32);
-  const int spectral=preview?integer(d,"preview_spectral",time,3):integer(d,"spectral_samples",time,3);
+  const int grid=preview?integer(d,"preview_grid",time,16):integer(d,"ray_grid",time,64);
+  const int spectral=3+2*std::clamp(preview?integer(d,"preview_spectral",time,0):integer(d,"nuke_spectral_quality",time,0),0,4);
   fl::ofx::DetectionOptions detect;
   detect.threshold=float(number(d,"threshold",time,2));
   detect.source_cap=float(number(d,"source_cap",time,0));
@@ -421,19 +495,36 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       for(int c=0;c<3;++c)src_rgb[i+c]=input.read(x+input.bounds.x1,y+input.bounds.y1,c);
     }
   }
+  std::vector<float> mask_values;
+  if(d->mask && fx->clipGetPropertySet) {
+    OfxPropertySetHandle mp=nullptr;
+    if(fx->clipGetPropertySet(d->mask,&mp)==kOfxStatOK&&mp){
+      int connected=0;
+      if(prop->propGetInt(mp,kOfxImageClipPropConnected,0,&connected)==kOfxStatOK&&connected){
+        Image mask;
+        if(mask.open(d->mask,time)){
+          mask_values.resize(size_t(w)*h);
+          const int chan=mask.channels==4?3:0;
+          for(int y=0;y<h;++y)for(int x=0;x<w;++x)
+            mask_values[size_t(y)*w+x]=mask.read(x+input.bounds.x1,y+input.bounds.y1,chan);
+        }
+      }
+    }
+  }
   std::vector<fl::Source> sources;
   if(integer(d,"source_mode",time,0)==1){
     const auto point=point_param(d,"light_position",time);
     const float v=float(number(d,"light_radiance",time,10));
     sources.push_back({float(point[0]),float(point[1]),v,v,v});
   }else{
-    sources=fl::ofx::detect_sources(src_rgb,w,h,detect);
+    sources=fl::ofx::detect_sources(src_rgb,w,h,detect,
+           mask_values.empty()?nullptr:&mask_values);
   }
   fl::Settings settings{};
   settings.fov_h_deg=float(number(d,"fov_h",time,40));
   settings.fov_v_deg=float(number(d,"fov_v",time,0));
   settings.grid=grid;settings.spectral_samples=spectral;
-  settings.max_pairs=integer(d,"max_pairs",time,40);
+  settings.max_pairs=integer(d,"max_pairs",time,2000);
   settings.gain=float(number(d,"gain",time,1000));
   if(preview && integer(d,"source_mode",time,0)==0) {
     const float ds=float(std::max(1,detect.downsample));
@@ -450,9 +541,9 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   settings.pair_surface_b=integer(d,"surface_b",time,1);
   const float fov_v=settings.fov_v_deg>0?settings.fov_v_deg:
     2.f*180.f/pi*std::atan(std::tan(settings.fov_h_deg*pi/360.f)*h/float(w));
-  const bool need_ghost=mode==0||mode==1||mode==2;
-  const bool need_haze=mode==0||mode==1||mode==3;
-  const bool need_star=mode==0||mode==1||mode==4;
+  const bool need_ghost=effectiveMode==0||effectiveMode==1||effectiveMode==2;
+  const bool need_haze=effectiveMode==0||effectiveMode==1||effectiveMode==3;
+  const bool need_star=effectiveMode==0||effectiveMode==1||effectiveMode==4;
   std::vector<float> emitted(size_t(w)*h*3,0.f);
   if(need_ghost && !sources.empty()){
     fs::path path;
@@ -475,7 +566,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       // A missing lens must NEVER silently substitute a different one, but a
       // failed effect must not turn the source clip into an opaque black plate.
       // Instead pass through the original source in Composite mode.
-      if(mode==0){
+      if(effectiveMode==0){
         for(int yy=std::max(window.y1,output.bounds.y1);yy<std::min(window.y2,output.bounds.y2);++yy)
           for(int xx=std::max(window.x1,output.bounds.x1);xx<std::min(window.x2,output.bounds.x2);++xx)
             for(int cc=0;cc<output.channels;++cc)output.write(xx,yy,cc,input.read(xx,yy,cc));
@@ -483,7 +574,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       }
       return kOfxStatFailed;
     }
-    const float blur=float(number(d,"ghost_blur",time,0));
+    const float blur=float(number(d,"ghost_blur",time,.003));
     const int passes=integer(d,"ghost_blur_passes",time,3);
     const int backend=integer(d,"render_backend",time,0);
     bool gpu_rendered=false;
@@ -505,7 +596,8 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   if(fx->abort(e))return kOfxStatReplyDefault;
   if(need_haze && number(d,"haze_gain",time,0)>0 && integer(d,"source_mode",time,0)==0) {
     auto haze=haze_layer(src_rgb,w,h,detect,float(number(d,"haze_gain",time,0)),
-        float(number(d,"haze_radius",time,.15)),integer(d,"haze_passes",time,3));
+        float(number(d,"haze_radius",time,.15)),integer(d,"haze_passes",time,3),
+        mask_values.empty()?nullptr:&mask_values);
     for(size_t i=0;i<emitted.size();++i)emitted[i]+=haze[i];
   }
   if(fx->abort(e))return kOfxStatReplyDefault;
@@ -515,7 +607,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
         float(number(d,"starburst_scale",time,.15)),settings.fov_h_deg,fov_v);
     for(size_t i=0;i<emitted.size();++i)emitted[i]+=star[i];
   }
-  if(mode==5) {
+  if(effectiveMode==5) {
     std::fill(emitted.begin(),emitted.end(),0.f);
     for(const auto& s:sources){
       const int x=std::clamp(int(s.x*w),0,w-1),y=std::clamp(int(s.y*h),0,h-1);
@@ -537,7 +629,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       if(ix<0||iy<0||ix>=w||iy>=h)continue;
       const size_t index=(size_t(iy)*w+ix)*3;
       for(int c=0;c<3;++c){
-        const float base=mode==0?input.read(x,y,c):0;
+        const float base=effectiveMode==0?input.read(x,y,c):0;
         output.write(x,y,c,base+emitted[index+c]);
       }
       if(output.channels==4){

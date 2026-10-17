@@ -7,20 +7,24 @@ namespace {
 float luma(const fl::Source& s) {return .2126f*s.r+.7152f*s.g+.0722f*s.b;}
 }
 std::vector<fl::Source> detect_sources(const std::vector<float>& rgb,int w,int h,
-                                       const DetectionOptions& opts) {
+                                       const DetectionOptions& opts,
+                                       const std::vector<float>* mask) {
   std::vector<fl::Source> sources;
   if(w<=0||h<=0||rgb.size()!=size_t(w)*size_t(h)*3)return sources;
+  if(mask&&mask->size()!=size_t(w)*size_t(h))return sources;
   const int ds=std::clamp(opts.downsample,1,32);
   // Nuke calculates an average RGB over each downsample block before threshold.
   for(int by=0;by<h;by+=ds) {
     for(int bx=0;bx<w;bx+=ds) {
-      double cr=0,cg=0,cb=0; int count=0;
+      double cr=0,cg=0,cb=0,maskSum=0; int count=0;
       for(int y=by;y<std::min(h,by+ds);++y)
         for(int x=bx;x<std::min(w,bx+ds);++x) {
           const size_t i=(size_t(y)*w+x)*3;
           const float r=rgb[i],g=rgb[i+1],b=rgb[i+2];
           if(!std::isfinite(r)||!std::isfinite(g)||!std::isfinite(b))continue;
-          cr+=r;cg+=g;cb+=b;++count;
+          cr+=r;cg+=g;cb+=b;
+          maskSum+=mask?std::clamp((*mask)[size_t(y)*w+x],0.f,1.f):1.0;
+          ++count;
         }
       if(count==0)continue;
       fl::Source s{};
@@ -29,6 +33,9 @@ std::vector<fl::Source> detect_sources(const std::vector<float>& rgb,int w,int h
       if(opts.source_cap>0&&lum>opts.source_cap){
         const float k=opts.source_cap/lum;s.r*=k;s.g*=k;s.b*=k;lum=opts.source_cap;
       }
+      // Nuke applies the average mask AFTER source capping and BEFORE threshold.
+      const float weight=float(maskSum/count);
+      s.r*=weight;s.g*=weight;s.b*=weight;lum*=weight;
       if(lum<opts.threshold)continue;
       s.x=(bx+.5f*std::min(ds,w-bx))/w;
       s.y=(by+.5f*std::min(ds,h-by))/h;
@@ -60,10 +67,11 @@ std::vector<fl::Source> detect_sources(const std::vector<float>& rgb,int w,int h
     }
     sources.swap(merged);
   }
-  if(opts.max_sources>0&&sources.size()>size_t(opts.max_sources)){
-    std::partial_sort(sources.begin(),sources.begin()+opts.max_sources,sources.end(),
+  const int cap=opts.max_sources>0?opts.max_sources:8192;
+  if(sources.size()>size_t(cap)){
+    std::partial_sort(sources.begin(),sources.begin()+cap,sources.end(),
       [](const auto& a,const auto& b){return luma(a)>luma(b);});
-    sources.resize(opts.max_sources);
+    sources.resize(cap);
   }
   return sources;
 }

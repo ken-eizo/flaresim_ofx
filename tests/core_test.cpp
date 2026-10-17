@@ -17,6 +17,10 @@ int main(){
   fl::ofx::DetectionOptions options;options.downsample=1;options.threshold=2;
   auto sources=fl::ofx::detect_sources(image,64,32,options);
   if(sources.size()!=1 || std::abs(sources[0].x-(32.5f/64))>0.0001f){std::cerr<<"Incorrect source coordinates\n";return 2;}
+  std::vector<float> mask(64*32,0.f);
+  if(!fl::ofx::detect_sources(image,64,32,options,&mask).empty())return 6;
+  mask[15*64+32]=1.f;
+  if(fl::ofx::detect_sources(image,64,32,options,&mask).size()!=1)return 7;
   options.downsample=4;
   sources=fl::ofx::detect_sources(image,64,32,options);
   if(sources.size()!=1){std::cerr<<"Incorrect block-average detection\n";return 3;}

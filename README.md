@@ -32,17 +32,21 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 ## Controls
 
-**Lens Preset:** Six common Nuke optical prescriptions. **Lens File (Optional):** Standard OFX file-picker input for any of the 1,370 bundled `.lens` files or an external prescription. Leave it empty to use the selected preset. Bundled lenses are in `FlareSim.ofx.bundle/Contents/Resources/lenses/`. The old `lens_name` parameter is kept hidden for saved project compatibility.
+**Lens File:** Nuke-style first control and file browser. All 1,370 original prescriptions are bundled. Empty path uses the optional bundled lens preset in OFX Extensions.
 
-**Light Sources:** Manual Position is the initial mode: even a black opaque plate gets a flare centered at 0.5,0.5. Detect Highlights still uses the upstream Nuke threshold and block extraction. The standard OpenFX overlay lets you drag Light Position on hosts supporting V1 OpenGL overlays. The X/Y controls always remain available.
+**Light Sources:** Detect Highlights (Nuke) is the initial mode. Optional Manual Position and overlay are in OFX Extensions.
 
-**Optical:** FOV, Flare Gain, Ray Grid, Max Ghost Pairs, Aperture, Pupil Jitter, Spectral Samples, selected reflection pair, and Optical Renderer (Auto / CPU / GPU with fallback).
+**Controls:** Follows Nuke order: Lens File, Ghost, Preview Mode, Camera, Aperture, Spectral, Post-process, Starburst, Diagnostics, Output, Pairs. OFX Extensions follows last.
 
 **Highlight extraction:** Threshold, Source Cap, Downsample, Max Sources, Cluster Radius. The image is assumed to be **scene-linear**; threshold is not applied to display-referred sRGB.
 
 **Output Mode:** Composite / Flare Only / Ghost Only / Haze Only / Starburst Only / Sources Only. Portable RGBA output replaces Nuke's arbitrary named-channel groups (which the baseline OFX API does not guarantee across hosts).
 
 **Preview Mode:** Overrides grid, downsample, spectral samples, and max sources. Like the Nuke preview, it compensates source downsample energy approximately; capped sources may still differ.
+
+## Remaining Nuke-specific gaps
+
+Generic OFX outputs do not guarantee Nuke's arbitrary named channels (flare.rgb, source.rgb, haze.rgb and starburst.rgb), so portable Output Mode is used. Nuke's complete individual 500-pair toggles are not yet implemented; the OFX single-pair selection is only a partial substitute. An optional second Mask clip now gates source detection like the Nuke original. Pixel-level reference parity and cross-host testing remain pending.
 
 ## Status and caveats
 

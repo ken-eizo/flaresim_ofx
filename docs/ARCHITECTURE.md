@@ -69,8 +69,14 @@ Avoid stating universal compatibility before these checks. OFX is a common API s
 
 - Bundled lens selection: curated choice menu; all 1,370 Nuke .lens files are also accessible with a standard OFX file-path browser.
 - Custom file path overrides a curated preset; missing lens errors no longer replace the input by black in Composite mode.
-- Manual Position is the initial source mode so the effect is visible on a black layer. Detection remains unchanged and selectable.
+- Nuke highlight detection is the initial mode. Optional manual source is in OFX Extensions.
 - Light Position is a normalized, animatable XY parameter. In overlay-capable hosts, the OpenFX OverlayInteractV1 uses a 1px white crosshair with a 3px black outline for visibility, drawn in canonical RoD coordinates and draggable with the mouse.
 - Hosts without overlay support continue to use the numeric controls.
 - The synthetic OFX host tests check file selection descriptors, overlay event lifecycle, source coordinates, and nonzero flare output on a black plate.
 - Actual DaVinci Resolve overlay and file-picker behavior must be confirmed by viewing the host UI, not assumed from host capability negotiation.
+
+## Nuke reference parity
+
+Parameter groups follow original Nuke order; OFX Extensions is last. Restored original Ray Grid=64, Ghost Blur=0.003, manual FOV V=24, auto FOV V, sensor/focal controls, and Detect Highlights default. The optional Mask clip is applied via block-average alpha after source capping, matching Nuke.
+
+Unfinished compatibility items: full dynamic 500-checkbox ghost-pair UI, arbitrary named Nuke image channels, Nuke-vs-OFX reference-frame parity and real-host integration tests.

@@ -227,11 +227,14 @@ int main(){
  if(call(kOfxActionCreateInstance)!=kOfxStatOK){std::cerr<<"Instance failed\n";return 6;}
  // Confirm descriptors expose a real file picker, a stable Nuke preset,
  // and a visible manual default instead of silent empty black layers.
- if(effect.parameters.params.at("source_mode").get()->props.ints[kOfxParamPropDefault][0]!=1)return 17;
+ if(effect.parameters.params.at("source_mode").get()->props.ints[kOfxParamPropDefault][0]!=0)return 17;
+ if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]!=64)return 30;
+ if(std::abs(effect.parameters.params.at("ghost_blur")->props.doubles[kOfxParamPropDefault][0]-.003)>1e-9)return 31;
  if(!effect.parameters.params.count("lens_preset"))return 18;
  auto& lensP=effect.parameters.params.at("lens_file")->props.strings;
  if(lensP[kOfxParamPropStringMode][0]!=kOfxParamStringIsFilePath)return 19;
 #if defined(_WIN32) || defined(__APPLE__)
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  // Exercise the real OFX overlay pen lifecycle (without OpenGL draw).
  auto itPtr=effect.props.pointers.find(kOfxImageEffectPluginPropOverlayInteractV1);
  if(itPtr==effect.props.pointers.end()||itPtr->second.empty()||!itPtr->second[0])return 20;
@@ -257,6 +260,7 @@ int main(){
  if(std::abs(pt[0]-.75)>1e-8||std::abs(pt[1]-.25)>1e-8)return 26;
  effect.parameters.params.at("light_position")->props.doubles[kOfxParamPropDefault]={.5,.5};
  if(overlay(kOfxActionDestroyInstance,&mh,nullptr,nullptr)!=kOfxStatOK)return 27;
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=0;
 #endif
 
  image_init(source,64,32);image_init(output,64,32);
@@ -268,7 +272,8 @@ int main(){
  Props args;set_double(reinterpret_cast<OfxPropertySetHandle>(&args),kOfxPropTime,0,0);
  for(int i=0;i<4;i++)set_int(reinterpret_cast<OfxPropertySetHandle>(&args),
     kOfxImageEffectPropRenderWindow,i,(i==2?64:(i==3?32:0)));
- // Regression: a black opaque solid with default settings must produce
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
+ // Regression: a black opaque solid with Manual Position enabled must produce
  // a visible physical flare. This also exercises the bundled default lens.
  const float markerR=source.pixels[sample], markerG=source.pixels[sample+1],
              markerB=source.pixels[sample+2];
@@ -286,6 +291,7 @@ int main(){
  std::cout<<"Default black plate flare energy="<<flare_energy<<"\n";
  source.pixels[sample]=markerR;source.pixels[sample+1]=markerG;source.pixels[sample+2]=markerB;
  mode->props.ints[kOfxParamPropDefault][0]=5;
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=0;
  std::fill(output.pixels.begin(),output.pixels.end(),0.f);
  if(call(kOfxImageEffectActionRender,reinterpret_cast<OfxPropertySetHandle>(&args))!=kOfxStatOK){
    std::cerr<<"Render failed\n";return 7;
@@ -294,6 +300,7 @@ int main(){
    peak=std::max({peak,output.pixels[i],output.pixels[i+1],output.pixels[i+2]});
  if(!(peak>2.f&&std::isfinite(peak))){std::cerr<<"No bright source: "<<peak<<"\n";return 8;}
  mode->props.ints[kOfxParamPropDefault][0]=2; // Ghost Only
+ effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]=64;
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  effect.parameters.params.at("light_radiance")->props.doubles[kOfxParamPropDefault][0]=100.0;

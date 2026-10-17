@@ -9,5 +9,6 @@ struct DetectionOptions {
 // Input is scene-linear, full-frame RGB (not display-referred).
 // Preserves upstream Nuke per-block averaging and luma weighting.
 std::vector<fl::Source> detect_sources(const std::vector<float>& rgb,int w,int h,
-                                       const DetectionOptions& options);
+                                       const DetectionOptions& options,
+                                       const std::vector<float>* mask=nullptr);
 }
