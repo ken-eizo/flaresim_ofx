@@ -521,6 +521,30 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   // 0 = Flare as RGB (Nuke), 1 = Sources Only (Nuke), 2 = Composite
   const bool sources_only=mode==1;
   const bool composite=mode==2;
+  // At the Nuke-default initial state no optical prescription has been
+  // selected. Short circuit before image reads, large scratch allocations,
+  // source scanning or CUDA initialization.
+  const bool no_lens=integer(d,"lens_preset",time,0)==0 &&
+       string_param(d,"lens_file",time).empty() &&
+       string_param(d,"lens_name",time)==kLensDefault;
+  if(!sources_only && no_lens &&
+     number(d,"haze_gain",time,0)==0 &&
+     number(d,"starburst_gain",time,0)==0){
+    const int x1=std::max(window.x1,output.bounds.x1);
+    const int y1=std::max(window.y1,output.bounds.y1);
+    const int x2=std::min(window.x2,output.bounds.x2);
+    const int y2=std::min(window.y2,output.bounds.y2);
+    for(int y=y1;y<y2;++y){
+      if((y&63)==0&&fx->abort(e))return kOfxStatReplyDefault;
+      for(int x=x1;x<x2;++x){
+        for(int c=0;c<std::min(3,output.channels);++c)
+          output.write(x,y,c,composite?input.read(x,y,c):0.f);
+        if(output.channels==4)
+          output.write(x,y,3,input.read(x,y,3));
+      }
+    }
+    return kOfxStatOK;
+  }
   // Sources Only is diagnostic: no lens, CUDA, PSF, 3-channel frame
   // allocation or ray tracing should ever run here. Match the original
   // Nuke block-average source threshold (including optional alpha mask).
