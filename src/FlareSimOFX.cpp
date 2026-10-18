@@ -384,9 +384,6 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   grouped(define_double(s,{"starburst_gain","Starburst Gain",0,0,1e5,"Fraunhofer diffraction intensity."}),"nuke_star");
   grouped(define_double(s,{"starburst_scale","Starburst Scale",.15,0,1,"Diffraction radius relative to diagonal."}),"nuke_star");
 
-  group("nuke_diagnostics","Diagnostics",false);
-  // Source diagnostics are selected using Output Mode > Sources Only.
-
   group("nuke_output","Output",true);
   // Nuke writes flare/source/haze/starburst to arbitrary named channels.
   // Standard OFX cannot promise this across every host; expose the mapped
@@ -402,14 +399,13 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   });
   prop->propSetInt(old_output,kOfxParamPropSecret,0,1);
 
-  group("nuke_pairs","Pairs",false);
-  // The existing OFX single-pair selection remains optional; Nuke's full
-  // list of on/off toggles requires a separate host-independent port.
-  grouped(define_choice(s,"pair_mode","Pair Selection",0,{"All","Only Selected","Exclude Selected"}),"nuke_pairs");
-  grouped(define_int(s,"surface_a","Pair Surface A",0,0,256,"Zero-based first optical surface."),"nuke_pairs");
-  grouped(define_int(s,"surface_b","Pair Surface B",1,0,256,"Zero-based second optical surface."),"nuke_pairs");
-
+  // Original Nuke's Pairs tab contains per-optical-surface toggles.
+  // This separate optional pair-filter is not the same functionality and
+  // must not masquerade as a faithful "Pairs" tab.
   group("additional","Additional Controls",false);
+  grouped(define_choice(s,"pair_mode","Pair Selection",0,{"All","Only Selected","Exclude Selected"}),"additional");
+  grouped(define_int(s,"surface_a","Pair Surface A",0,0,256,"Zero-based first optical surface."),"additional");
+  grouped(define_int(s,"surface_b","Pair Surface B",1,0,256,"Zero-based second optical surface."),"additional");
 
   grouped(define_choice(s, "source_mode","Light Sources",0,{"Detect Highlights","Manual Position"}),"additional");
   OfxPropertySetHandle q=nullptr;

@@ -262,6 +262,9 @@ int main(){
  if(std::abs(effect.parameters.params.at("ghost_blur")->props.doubles[kOfxParamPropDefault][0]-.003)>1e-9)return 31;
  if(!effect.parameters.params.count("lens_preset"))return 18;
  if(effect.parameters.params.count("show_sources"))return 58;
+ if(effect.parameters.params.count("nuke_diagnostics"))return 59;
+ if(effect.parameters.params.count("nuke_pairs"))return 60;
+ if(effect.parameters.params.at("pair_mode")->props.strings[kOfxParamPropParent][0]!="additional")return 61;
  // A strict OFX host rejects descriptor-time paramGetHandle. Properties
  // must be assigned to the exact paramDefine descriptor returned handle.
  auto& catalog=effect.parameters.params.at("lens_preset")->props.strings[kOfxParamPropChoiceOption];
