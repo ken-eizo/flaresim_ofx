@@ -385,7 +385,7 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   grouped(define_double(s,{"starburst_scale","Starburst Scale",.15,0,1,"Diffraction radius relative to diagonal."}),"nuke_star");
 
   group("nuke_diagnostics","Diagnostics",false);
-  grouped(define_boolean(s,"show_sources","Show Sources",0,"Show the source map for tuning detection."),"nuke_diagnostics");
+  // Source diagnostics are selected using Output Mode > Sources Only.
 
   group("nuke_output","Output",true);
   // Nuke writes flare/source/haze/starburst to arbitrary named channels.
@@ -519,7 +519,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   if(fx->abort(e))return kOfxStatReplyDefault;
   const int mode=integer(d,"output_format",time,0);
   // 0 = Flare as RGB (Nuke), 1 = Sources Only (Nuke), 2 = Composite
-  const bool sources_only=integer(d,"show_sources",time,0)!=0||mode==1;
+  const bool sources_only=mode==1;
   const bool composite=mode==2;
   const bool preview=integer(d,"preview",time,0)!=0;
   const int grid=preview?integer(d,"preview_grid",time,16):integer(d,"ray_grid",time,64);
