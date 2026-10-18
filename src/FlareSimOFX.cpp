@@ -521,6 +521,90 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
   // 0 = Flare as RGB (Nuke), 1 = Sources Only (Nuke), 2 = Composite
   const bool sources_only=mode==1;
   const bool composite=mode==2;
+  // Sources Only is diagnostic: no lens, CUDA, PSF, 3-channel frame
+  // allocation or ray tracing should ever run here. Match the original
+  // Nuke block-average source threshold (including optional alpha mask).
+  if(sources_only) {
+    const bool manual=integer(d,"source_mode",time,0)==1;
+    const int ds=std::clamp(integer(d,"preview",time,0)!=0?
+      integer(d,"preview_downsample",time,8):integer(d,"downsample",time,4),1,32);
+    const float threshold=float(number(d,"threshold",time,2));
+    const float cap=float(number(d,"source_cap",time,0));
+    const int max_sources=integer(d,"preview",time,0)!=0?
+      integer(d,"preview_max_sources",time,100):integer(d,"max_sources",time,512);
+    const int dw=std::max(1,w/ds),dh=std::max(1,h/ds);
+    struct Block {int x0,y0;float r,g,b,lum;};
+    std::vector<Block> blocks;
+    if(manual){
+      const auto point=point_param(d,"light_position",time);
+      const float rad=float(number(d,"light_radiance",time,10));
+      blocks.push_back({std::clamp(int(point[0]*w),0,w-1),
+                        std::clamp(int(point[1]*h),0,h-1),rad,rad,rad,rad});
+    }else{
+      Image mask;
+      bool use_mask=false;
+      if(d->mask && fx->clipGetPropertySet){
+        OfxPropertySetHandle mp=nullptr;int connected=0;
+        if(fx->clipGetPropertySet(d->mask,&mp)==kOfxStatOK&&mp &&
+           prop->propGetInt(mp,kOfxImageClipPropConnected,0,&connected)==kOfxStatOK&&connected)
+          use_mask=mask.open(d->mask,time);
+      }
+      blocks.reserve(size_t(std::min(dw*dh,std::max(1,max_sources))));
+      for(int by=0;by<dh;++by){
+        if((by&15)==0&&fx->abort(e))return kOfxStatReplyDefault;
+        for(int bx=0;bx<dw;++bx){
+          const int x0=bx*ds,y0=by*ds;
+          const int xend=bx==dw-1?w:std::min(w,x0+ds);
+          const int yend=by==dh-1?h:std::min(h,y0+ds);
+          double rr=0,gg=0,bb=0,aa=0;int count=0;
+          for(int y=y0;y<yend;++y)for(int x=x0;x<xend;++x){
+            const int px=x+input.bounds.x1,py=y+input.bounds.y1;
+            rr+=input.read(px,py,0);
+            gg+=input.read(px,py,1);
+            bb+=input.read(px,py,2);
+            aa+=use_mask?mask.read(px,py,mask.channels==4?3:0):1.;
+            ++count;
+          }
+          if(!count)continue;
+          float r=float(rr/count),g=float(gg/count),b=float(bb/count);
+          float lum=.2126f*r+.7152f*g+.0722f*b;
+          if(cap>0&&lum>cap){const float k=cap/lum;r*=k;g*=k;b*=k;lum=cap;}
+          const float opacity=float(aa/count);
+          r*=opacity;g*=opacity;b*=opacity;lum*=opacity;
+          if(lum<threshold)continue;
+          blocks.push_back({x0,y0,r,g,b,lum});
+        }
+      }
+      const int limit=max_sources>0?max_sources:8192;
+      if(blocks.size()>size_t(limit)){
+        std::partial_sort(blocks.begin(),blocks.begin()+limit,blocks.end(),
+          [](const Block&a,const Block&b){return a.lum>b.lum;});
+        blocks.resize(limit);
+      }
+    }
+    // Only write the requested render window; avoid frame-sized scratch
+    // buffers. The source map is rendered as nominal ds-by-ds rectangles.
+    const int x1=std::max(window.x1,output.bounds.x1);
+    const int y1=std::max(window.y1,output.bounds.y1);
+    const int x2=std::min(window.x2,output.bounds.x2);
+    const int y2=std::min(window.y2,output.bounds.y2);
+    for(int y=y1;y<y2;++y){
+      if((y&63)==0&&fx->abort(e))return kOfxStatReplyDefault;
+      for(int x=x1;x<x2;++x){
+        output.write(x,y,0,0);output.write(x,y,1,0);output.write(x,y,2,0);
+        if(output.channels==4)output.write(x,y,3,input.read(x,y,3));
+      }
+    }
+    for(const auto& block:blocks){
+      const int bx0=block.x0+input.bounds.x1,by0=block.y0+input.bounds.y1;
+      for(int y=std::max(y1,by0);y<std::min(y2,by0+ds);++y)
+        for(int x=std::max(x1,bx0);x<std::min(x2,bx0+ds);++x){
+          output.write(x,y,0,block.r);
+          output.write(x,y,1,block.g);
+          output.write(x,y,2,block.b);
+        }
+    }    return kOfxStatOK;
+  }
   const bool preview=integer(d,"preview",time,0)!=0;
   const int grid=preview?integer(d,"preview_grid",time,16):integer(d,"ray_grid",time,64);
   const int spectral=3+2*std::clamp(preview?integer(d,"preview_spectral",time,0):integer(d,"nuke_spectral_quality",time,0),0,4);
