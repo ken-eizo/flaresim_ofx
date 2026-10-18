@@ -34,9 +34,8 @@ For macOS / Linux use a suitable generator and copy the entire built bundle to a
 
 Original Nuke control labels and order are used in the main groups. Optional tools appear under **Additional Controls**. This effect contains no application-specific code.
 
-**Lens File:** The first parameter, as in Nuke. A host may offer a file picker, but OpenFX cannot guarantee one. Enter an absolute .lens path or a bundled filename.
+**Lens File:** The only visible lens selector, a standard OpenFX Choice. It scans bundled Contents/Resources/lenses/*.lens when the plugin descriptor loads. Add another .lens file to that directory and restart the host to include it in the list.
 
-**Lens Preset:** A standard OpenFX Choice immediately below Lens File. It offers all 1,370 original Nuke lens prescriptions without depending on a host file picker. Leave Lens File empty to use it. The existing six preset indices remain stable.
 
 **First use:** Select a Lens Preset such as AI_Nikkor_50mm_F1.2S.lens. The original Nuke default does not select a lens, so Ghost requires an explicit selection. Nuke Threshold=2 assumes HDR data. Typical SDR material (RGB between 0 and 1) has no highlights above 2, so lower Threshold (for example 0.1), or select Manual Position. **Sources Only** can be used before selecting a lens to inspect bright-pixel detection.
 

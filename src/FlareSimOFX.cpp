@@ -172,6 +172,21 @@ fs::path lens_directory(){
   const auto mod=module_location();
   return mod.empty()?fs::path{}:mod.parent_path().parent_path()/"Resources"/"lenses";
 }
+const std::vector<std::string>& all_lens_files(){
+  static const std::vector<std::string> entries=[]{
+    std::vector<std::string> result;
+    std::error_code ec;
+    const auto directory=lens_directory();
+    for(fs::directory_iterator it(directory,ec),end;!ec&&it!=end;it.increment(ec)){
+      if(!it->is_regular_file(ec)||ec)continue;
+      if(it->path().extension()==".lens")
+        result.push_back(it->path().filename().string());
+    }
+    std::sort(result.begin(),result.end());
+    return result;
+  }();
+  return entries;
+}
 std::shared_ptr<const LensSystem> load_lens(const fs::path& path){
   if(path.empty()||!fs::is_regular_file(path))return {};
   struct Entry{fs::path path;fs::file_time_type modified;std::shared_ptr<const LensSystem> lens;};
@@ -280,13 +295,11 @@ OfxStatus describe_context(OfxImageEffectHandle e){
   OfxParamSetHandle s=nullptr;
   if(fx->getParamSet(e,&s)!=kOfxStatOK)return kOfxStatFailed;
 
-  // Nuke: Lens File is the first control, a native file browser.
-  auto* file_props=define_string(s,"lens_file","Lens File","",
-       "Path to a .lens prescription file.");
-  prop->propSetString(file_props,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);
-  prop->propSetInt(file_props,kOfxParamPropStringFilePathExists,0,1);
-  OfxParamHandle unused_handle=nullptr;
-  auto* preset_props=define_choice(s,"lens_preset","Lens Preset",0,{
+  // A single visible control, implemented with the standard OpenFX Choice.
+  // Enumerate the bundled lens directory at plugin description time. OFX
+  // choices are static for the lifetime of a host descriptor, so restart
+  // the host after adding another .lens file.
+  auto* preset_props=define_choice(s,"lens_preset","Lens File",0,{
     "None","AI_Nikkor_50mm_F1.2S.lens",
     "Canon_50mm_F1.2_(Canon_FD50mm_F1.2L).lens",
     "Leica_50mm_F1.4_(Leica_Summilux_50mm_F1.4).lens",
@@ -294,11 +307,19 @@ OfxStatus describe_context(OfxImageEffectHandle e){
     "Sony_50mm_F1.45_IF_(Sony_Planar_T_FE_50mm_F1.4_ZA).lens",
     "Cosina_50mm_f1_(Cosina_Voigtlander_Nokton_50mm_F1.0_Aspherical).lens"
   });
-  // Preserve original preview indices 0-6. Append every remaining Nuke
-  // prescription deterministically, making lens choice host-independent.
+  // The first six positions preserve existing preview projects.
+  const auto& lenses=all_lens_files();
   int catalog_index=7;
-  for(const auto* filename:kAdditionalLensPresets)
-    prop->propSetString(preset_props,kOfxParamPropChoiceOption,catalog_index++,filename);
+  for(const auto& filename:lenses)
+    if(std::find(std::begin(kPresetFiles),std::end(kPresetFiles),filename)==std::end(kPresetFiles))
+      prop->propSetString(preset_props,kOfxParamPropChoiceOption,catalog_index++,filename.c_str());
+
+  // Old file-path parameter remains *hidden* solely for saved project
+  // compatibility. There is only one visible lens selector.
+  auto* old_file=define_string(s,"lens_file","Legacy Lens Path","",
+       "Legacy project compatibility");
+  prop->propSetInt(old_file,kOfxParamPropSecret,0,1);
+  OfxParamHandle unused_handle=nullptr;
 
   // Nuke knob sections, defined in the same order as FlareSim.cpp.
   auto group=[&](const char* name,const char* label,bool opened){
@@ -608,11 +629,17 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle in){
       if(preset==0 && legacy==kLensDefault) {
         path.clear();
       }else{
-        const std::string name=legacy!=kLensDefault && preset==0?
+        std::string name=legacy!=kLensDefault && preset==0?
           legacy:preset>=1&&preset<=int(std::size(kPresetFiles))?
-          kPresetFiles[preset-1]:preset>=7 &&
-          preset-7<int(std::size(kAdditionalLensPresets))?
-          kAdditionalLensPresets[preset-7]:"";
+          kPresetFiles[preset-1]:"";
+        if(name.empty()&&preset>=7){
+          int index=7;
+          for(const auto& candidate:all_lens_files()){
+            if(std::find(std::begin(kPresetFiles),std::end(kPresetFiles),candidate)!=std::end(kPresetFiles))
+              continue;
+            if(index++==preset){name=candidate;break;}
+          }
+        }
         if(name.find('/')!=std::string::npos||name.find('\\')!=std::string::npos||
            name.empty()||name=="."||name=="..")return kOfxStatErrValue;
         path=lens_directory()/fs::u8path(name);

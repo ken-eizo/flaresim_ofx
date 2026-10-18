@@ -279,7 +279,8 @@ int main(){
  if(effect.parameters.params.at("preview")->props.ints[kOfxParamPropDefault][0]!=0)return 37;
 
  auto& lensP=effect.parameters.params.at("lens_file")->props.strings;
- if(lensP[kOfxParamPropStringMode][0]!=kOfxParamStringIsFilePath)return 19;
+ if(effect.parameters.params.at("lens_file")->props.ints[kOfxParamPropSecret][0]!=1)return 19;
+ if(effect.parameters.params.at("lens_preset")->props.strings[kOfxPropLabel][0]!="Lens File")return 57;
 #if defined(_WIN32) || defined(__APPLE__)
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  // Exercise the real OFX overlay pen lifecycle (without OpenGL draw).
