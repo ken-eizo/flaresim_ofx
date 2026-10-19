@@ -2,7 +2,7 @@
 
 A portable [OpenFX](https://openeffects.org/) port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke). FlareSim simulates physically based lens flares by ray tracing real optical prescriptions instead of using painted elements or lookup textures.
 
-**Version:** 1.0.0. **Windows:** x64 (CUDA / CPU fallback). **macOS:** Apple Metal build workflow provided; binary and runtime verification pending.
+**Version:** 1.0.0. **Windows:** x64 (CUDA / CPU fallback). **macOS:** yet.
 
 ## Credits
 
