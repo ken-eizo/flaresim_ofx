@@ -209,6 +209,40 @@ int abort_requested(void* ctx){
 }
 struct ParamDef{const char* name;const char* label;double default_value;
                 double min_value;double max_value;const char* hint;};
+// OFX separates legal parameter bounds from interactive slider bounds.
+// A large legal maximum must not make a one-pixel drag jump by 100,000.
+// Keep all numerical defaults and legal bounds unchanged for Nuke parity.
+struct SoftRange { const char* id; double low,high,step; int digits; };
+constexpr SoftRange kSoftDoubles[] = {
+  {"gain",0,5000,10,1},
+  {"threshold",0,10,.05,2},
+  {"source_cap",0,50,.25,2},
+  {"fov_h",1,180,1,1},
+  {"fov_v",1,180,1,1},
+  {"sensor_w",1,100,.5,1},
+  {"sensor_h",1,100,.5,1},
+  {"focal_length",1,300,1,1},
+  {"aperture_rotation",-180,180,1,1},
+  {"ghost_blur",0,.02,.0001,4},
+  {"haze_gain",0,1000,1,1},
+  {"haze_radius",0,.5,.005,3},
+  {"starburst_gain",0,1000,1,1},
+  {"starburst_scale",0,.5,.005,3},
+  {"light_radiance",0,50,.25,2},
+};
+struct SoftIntegerRange { const char* id; int low,high; };
+constexpr SoftIntegerRange kSoftInts[] = {
+  {"ray_grid",2,128},
+  {"preview_grid",2,128},
+  {"max_sources",0,1024},
+  {"preview_max_sources",0,512},
+  {"jitter_seed",0,1000},
+  {"cluster_radius",0,64},
+  {"surface_a",0,64},
+  {"surface_b",0,64},
+  {"max_pairs",1,65535},
+};
+
 OfxPropertySetHandle define_double(OfxParamSetHandle set,const ParamDef& d){
   OfxPropertySetHandle p=nullptr;
   if(params->paramDefine(set,kOfxParamTypeDouble,d.name,&p)!=kOfxStatOK)throw std::runtime_error("paramDefine");
@@ -216,8 +250,17 @@ OfxPropertySetHandle define_double(OfxParamSetHandle set,const ParamDef& d){
   prop->propSetDouble(p,kOfxParamPropDefault,0,d.default_value);
   prop->propSetDouble(p,kOfxParamPropMin,0,d.min_value);
   prop->propSetDouble(p,kOfxParamPropMax,0,d.max_value);
-  prop->propSetDouble(p,kOfxParamPropDisplayMin,0,d.min_value);
-  prop->propSetDouble(p,kOfxParamPropDisplayMax,0,d.max_value);
+  double display_min=d.min_value,display_max=d.max_value;
+  for(const auto& range:kSoftDoubles)
+    if(std::strcmp(d.name,range.id)==0){
+      display_min=std::max(d.min_value,range.low);
+      display_max=std::min(d.max_value,range.high);
+      prop->propSetDouble(p,kOfxParamPropIncrement,0,range.step);
+      prop->propSetInt(p,kOfxParamPropDigits,0,range.digits);
+      break;
+    }
+  prop->propSetDouble(p,kOfxParamPropDisplayMin,0,display_min);
+  prop->propSetDouble(p,kOfxParamPropDisplayMax,0,display_max);
   prop->propSetString(p,kOfxParamPropHint,0,d.hint);
   return p;
 }
@@ -228,6 +271,15 @@ OfxPropertySetHandle define_int(OfxParamSetHandle set,const char* name,const cha
   prop->propSetInt(p,kOfxParamPropDefault,0,def);
   prop->propSetInt(p,kOfxParamPropMin,0,min);
   prop->propSetInt(p,kOfxParamPropMax,0,max);
+  int display_min=min,display_max=max;
+  for(const auto& range:kSoftInts)
+    if(std::strcmp(name,range.id)==0){
+      display_min=std::max(min,range.low);
+      display_max=std::min(max,range.high);
+      break;
+    }
+  prop->propSetInt(p,kOfxParamPropDisplayMin,0,display_min);
+  prop->propSetInt(p,kOfxParamPropDisplayMax,0,display_max);
   prop->propSetString(p,kOfxParamPropHint,0,hint);
   return p;
 }

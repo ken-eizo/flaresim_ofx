@@ -259,6 +259,14 @@ int main(){
  // and a visible manual default instead of silent empty black layers.
  if(effect.parameters.params.at("source_mode").get()->props.ints[kOfxParamPropDefault][0]!=0)return 17;
  if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDefault][0]!=64)return 30;
+ if(effect.parameters.params.at("gain")->props.doubles[kOfxParamPropMax][0]!=1e7)return 63;
+ if(effect.parameters.params.at("gain")->props.doubles[kOfxParamPropDisplayMax][0]!=5000)return 64;
+ if(effect.parameters.params.at("gain")->props.doubles[kOfxParamPropIncrement][0]!=10)return 65;
+ if(effect.parameters.params.at("threshold")->props.doubles[kOfxParamPropDisplayMax][0]!=10)return 66;
+ if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropDisplayMax][0]!=128)return 67;
+ if(effect.parameters.params.at("ray_grid")->props.ints[kOfxParamPropMax][0]!=2048)return 68;
+ if(effect.parameters.params.at("starburst_gain")->props.doubles[kOfxParamPropDisplayMax][0]!=1000)return 69;
+ if(effect.parameters.params.at("light_radiance")->props.doubles[kOfxParamPropDisplayMax][0]!=50)return 70;
  if(std::abs(effect.parameters.params.at("ghost_blur")->props.doubles[kOfxParamPropDefault][0]-.003)>1e-9)return 31;
  if(!effect.parameters.params.count("lens_preset"))return 18;
  if(effect.parameters.params.count("show_sources"))return 58;
