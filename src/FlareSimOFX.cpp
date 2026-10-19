@@ -272,12 +272,14 @@ OfxStatus describe(OfxImageEffectHandle e){
 #if defined(FLARESIM_HAVE_OVERLAY)
   // OFX V1 standard overlay. Only advertise when the host supplies its
   // interact suite; unsupported hosts retain numeric Light Position controls.
-  if(fl::overlay::supported())
-    prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,
-                        0,reinterpret_cast<void*>(&fl::overlay::entry));
+  // Never expose both entries simultaneously: some hosts instantiate and
+  // draw both, resulting in two overlapping viewer handles.
   if(fl::overlay::supports_v2())
     prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV2,
                         0,reinterpret_cast<void*>(&fl::overlay::entry_v2));
+  else if(fl::overlay::supported())
+    prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,
+                        0,reinterpret_cast<void*>(&fl::overlay::entry));
 #endif
   return kOfxStatOK;
 }

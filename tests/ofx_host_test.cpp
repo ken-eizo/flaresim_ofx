@@ -288,7 +288,8 @@ int main(){
 #if defined(_WIN32) || defined(__APPLE__)
  effect.parameters.params.at("source_mode")->props.ints[kOfxParamPropDefault][0]=1;
  // Exercise the real OFX overlay pen lifecycle (without OpenGL draw).
- auto itPtr=effect.props.pointers.find(kOfxImageEffectPluginPropOverlayInteractV1);
+ if(effect.props.pointers.count(kOfxImageEffectPluginPropOverlayInteractV1))return 62;
+ auto itPtr=effect.props.pointers.find(kOfxImageEffectPluginPropOverlayInteractV2);
  if(itPtr==effect.props.pointers.end()||itPtr->second.empty()||!itPtr->second[0])return 20;
  auto overlay=reinterpret_cast<OfxPluginEntryPoint*>(itPtr->second[0]);
  MockInteract mh;

@@ -84,14 +84,14 @@ bool set_point(Data* d,OfxTime t,OfxPropertySetHandle args,const OfxRectD& r) {
 }
 void cross(double x,double y,double sx,double sy) {
   glBegin(GL_LINES);
-  glVertex2d(x-10*sx,y);glVertex2d(x+10*sx,y);
-  glVertex2d(x,y-10*sy);glVertex2d(x,y+10*sy);
+  glVertex2d(x-18*sx,y);glVertex2d(x+18*sx,y);
+  glVertex2d(x,y-18*sy);glVertex2d(x,y+18*sy);
   glEnd();
   // Small gap between center and circular ring is deliberate.
   glBegin(GL_LINE_LOOP);
   for(int i=0;i<32;i++){
     const double a=6.283185307179586*double(i)/32.;
-    glVertex2d(x+6.*sx*std::cos(a),y+6.*sy*std::sin(a));
+    glVertex2d(x+11.*sx*std::cos(a),y+11.*sy*std::sin(a));
   }
   glEnd();
 }
@@ -140,8 +140,8 @@ OfxStatus perform(const char* action,OfxInteractHandle h,OfxPropertySetHandle ar
       if(!draw||p->propGetPointer(args,kOfxInteractPropDrawContext,0,&ptr)!=kOfxStatOK||!ptr)
         return kOfxStatReplyDefault;
       auto ctx=static_cast<OfxDrawContextHandle>(ptr);
-      const OfxPointD crosspts[4]{{x-10*sx,y},{x+10*sx,y},{x,y-10*sy},{x,y+10*sy}};
-      const OfxPointD ring[2]{{x-6*sx,y-6*sy},{x+6*sx,y+6*sy}};
+      const OfxPointD crosspts[4]{{x-18*sx,y},{x+18*sx,y},{x,y-18*sy},{x,y+18*sy}};
+      const OfxPointD ring[2]{{x-11*sx,y-11*sy},{x+11*sx,y+11*sy}};
       const bool manual=active(d,t);
       const OfxRGBAColourF black{0,0,0,manual?1.f:.65f};
       const OfxRGBAColourF white{1,1,1,manual?1.f:.65f};
@@ -173,8 +173,8 @@ OfxStatus perform(const char* action,OfxInteractHandle h,OfxPropertySetHandle ar
     double x=0,y=0,scale[2]{1,1};
     if(!current_point(d,t,r,x,y))return kOfxStatReplyDefault;
     p->propGetDoubleN(args,kOfxInteractPropPixelScale,2,scale);
-    if(std::abs(q[0]-x)>12.*std::abs(scale[0])||
-       std::abs(q[1]-y)>12.*std::abs(scale[1]))return kOfxStatReplyDefault;
+    if(std::abs(q[0]-x)>22.*std::abs(scale[0])||
+       std::abs(q[1]-y)>22.*std::abs(scale[1]))return kOfxStatReplyDefault;
     // Dragging a guide intentionally turns on Manual Position; merely
     // displaying the guide never changes the canonical Nuke highlight mode.
     if(!active(d,t) &&
