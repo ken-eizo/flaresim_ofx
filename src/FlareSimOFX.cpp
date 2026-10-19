@@ -362,11 +362,16 @@ OfxStatus describe_context(OfxImageEffectHandle e){
     "Cosina_50mm_f1_(Cosina_Voigtlander_Nokton_50mm_F1.0_Aspherical).lens"
   });
   // The first six positions preserve existing preview projects.
+  // 1,370 choice items can crash parameter editors on some OFX hosts.
+  // Preserve six tested choices and bundle every canonical lens prescription.
+  // The full menu is experimental and disabled in distributed builds.
+#if defined(FLARESIM_EXPERIMENTAL_FULL_LENS_CHOICES)
   const auto& lenses=all_lens_files();
   int catalog_index=7;
   for(const auto& filename:lenses)
     if(std::find(std::begin(kPresetFiles),std::end(kPresetFiles),filename)==std::end(kPresetFiles))
       prop->propSetString(preset_props,kOfxParamPropChoiceOption,catalog_index++,filename.c_str());
+#endif
 
   // Old file-path parameter remains *hidden* solely for saved project
   // compatibility. There is only one visible lens selector.
@@ -925,7 +930,7 @@ OfxStatus main_entry(const char* action,const void* raw,
    catch(...){return kOfxStatFailed;}
 }
 void set_host(OfxHost* h){host=h;}
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,ID,1,4,&set_host,&main_entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,ID,1,0,&set_host,&main_entry};
 }
 extern "C" {
 #ifdef _WIN32

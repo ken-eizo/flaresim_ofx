@@ -1,0 +1,52 @@
+name: Build and attach macOS v1.0.0
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos-metal:
+    name: macOS universal Metal
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Metal toolchain
+        run: |
+          xcodebuild -version
+          xcrun -sdk macosx --find metal
+          xcrun -sdk macosx --find metallib
+      - name: Configure universal macOS OFX
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON -DFLARESIM_GPU=ON \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Validate binary and Metal shaders
+        run: |
+          file build/FlareSim.ofx.bundle/Contents/MacOS/FlareSim.ofx
+          lipo -verify_arch arm64 x86_64 build/FlareSim.ofx.bundle/Contents/MacOS/FlareSim.ofx
+          test -s build/FlareSim.ofx.bundle/Contents/Resources/FlareLensMetal.metallib
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent FlareSim.ofx.bundle ../flaresim_ofx_mac_v1.0.0.zip
+          unzip -t ../flaresim_ofx_mac_v1.0.0.zip
+          shasum -a 256 ../flaresim_ofx_mac_v1.0.0.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flaresim_ofx_mac_v1.0.0
+          path: flaresim_ofx_mac_v1.0.0.zip
+          if-no-files-found: error
+      - name: Attach to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v1.0.0 flaresim_ofx_mac_v1.0.0.zip --clobber

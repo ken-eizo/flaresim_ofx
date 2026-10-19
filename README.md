@@ -1,69 +1,130 @@
 # FlareSim OFX
 
-**Portable OpenFX image-effect port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke).**  
-Original physical lens prescriptions, ghost ray tracing, source thresholding, and Fraunhofer starburst take precedence over host-specific effects.
+A portable [OpenFX](https://openeffects.org/) port of [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke). FlareSim simulates physically based lens flares by ray tracing real optical prescriptions instead of using painted elements or lookup textures.
 
-This is experimental source code. Windows CUDA builds and directly compares the original Nuke GPU renderer on RTX 2070 SUPER. The current v0.1.0-preview.4 release includes the portable UI fixes; production host validation is still pending. macOS Metal has not been natively verified.
+**Version:** 1.0.0. **Windows:** x64 (CUDA / CPU fallback). **macOS:** Apple Metal build workflow provided; binary and runtime verification pending.
 
-## Architecture
+## Credits
 
-- **Nuke is the reference** for optics, lens data, ghost reflection, source detection, haze, and starburst.
-- **FlareSimAE is a secondary source** for independent CPU rendering, performance improvements, pupil sampling, and thread-safe caches.
-- **OpenFX is the delivery format**, not a DaVinci Resolve-specific integration. It uses only standard OFX Image Effect API 1, with no Nuke NDK or Adobe SDK dependency.
-- Nuke-fidelity Auto: original Nuke CUDA code in a separate Windows companion DLL, or the closer Nuke-derived CPU path. Golden Angle and explicit Fast GPU mode use AE-derived CUDA/Metal. CPU fallback remains available.
+The core optical work originated with **Eamonn Nugent** ([blackhole-rt](https://github.com/space55/blackhole-rt)) and **Steve Watts Kennedy** ([FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke)). Selected rendering improvements originate from [FlareSimAE](https://github.com/ken-eizo/flaresim_ae). This is an unofficial OpenFX adaptation.
 
-## Build
+Original Nuke tutorial: https://youtu.be/yEsBOQNG16Y
 
-Requirements: CMake 3.24+, C++20 compiler. The necessary OpenFX C API headers and original Nuke lens files are included.
+## How it works
 
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
+FlareSim detects bright input pixels as light sources. Rays pass through the selected lens surfaces, and two-surface reflection pairs generate optical ghosts at the camera sensor. The original optical model reproduces chromatic aberration, Fresnel weighting and aperture-dependent shapes. Optional haze and diffraction starburst are also available.
+
+Windows includes the original Nuke CUDA reference renderer, alongside an independently implemented CPU fallback and optional extended GPU sampling.
+
+## Installation
+
+Get the package from the [Releases page](https://github.com/ken-eizo/flaresim_ofx/releases).
+
+**Windows (x64):** Extract the entire `FlareSim.ofx.bundle` folder into:
+
+`C:\Program Files\Common Files\OFX\Plugins\`
+
+Restart the OFX host. The DLL, lens prescriptions and third-party notices must remain inside the bundle.
+
+**macOS:** Once its GitHub Actions build has passed, install the entire bundle under `/Library/OFX/Plugins/` and restart the host. A macOS release file is not provided until that build succeeds.
+
+OpenFX compatibility is host dependent. Houdini 21 Copernicus successfully rendered a diagnostic six-choice build, but this does not prove compatibility with every OFX host, GPU or image format.
+
+## Quick start
+
+1. Connect an input image to **Source**.
+2. Select a prescription from **Lens File**. The stable version lists six curated choices to avoid crashing hosts that cannot construct a dropdown of 1,370 entries. All 1,370 original prescriptions remain bundled.
+3. Set **FOV H (deg)** to match the camera's field of view.
+4. Adjust **Threshold**. The original Nuke default is 2 for scene-linear HDR; for images whose pixel values range from 0 to 1, try 0.1, or choose **Manual Position**.
+5. Adjust **Flare Gain** to taste.
+6. Use **Output Mode → Sources Only** to inspect source detection without the expensive ghost render.
+
+## Output channels
+
+Nuke uses separate `flare.rgb`, `source.rgb`, `haze.rgb` and `starburst.rgb` image planes. Named planes cannot be guaranteed by the baseline OpenFX API in every host, so the portable port offers:
+
+| Output Mode | Result |
+|---|---|
+| **Flare as RGB** | Flare only, written to RGB |
+| **Sources Only** | Detected source map, without optical ray tracing |
+| **Composite** | Flare combined with the input RGB (OFX addition) |
+
+Nuke's **Separate channels** output and original default are not yet reproduced, and are intentionally not mislabeled as supported.
+
+## Parameters
+
+The Nuke control names and order are retained where functions match.
+
+### Ghost
+
+**Flare Gain** scales intensity. **Ray Grid (NxN)** determines pupil samples. **Pupil Jitter** supports the original Off, Stratified and Halton options plus the optional Golden Angle (Vogel) extension. **Jitter Seed** and **Auto Seed** control stratified patterns. **Threshold**, **Source Cap**, **Max Sources**, **Downsample**, and **Cluster Radius** control source detection and density.
+
+### Preview Mode
+
+**Enable Preview Mode** switches to its own **Ray Grid**, **Max Sources**, **Downsample** and **Spectral Samples** values to make look development faster. Downsample brightness compensation follows the Nuke design.
+
+### Camera
+
+**Use Sensor Size**, **Sensor Preset**, **FOV H (deg)**, **Auto FOV V**, **FOV V (deg)**, **Sensor Width (mm)**, **Sensor Height (mm)** and **Focal Length (mm)** specify field of view.
+
+### Aperture
+
+**Aperture Blades** and **Aperture Rotation** describe the entrance pupil.
+
+### Spectral
+
+**Spectral Samples** controls the number of wavelength samples (3, 5, 7, 9 or 11).
+
+### Post-process
+
+**Ghost Blur**, **Ghost Blur Passes**, **Haze Gain**, **Haze Radius** and **Haze Blur Passes** produce blur and veiling glare.
+
+### Starburst
+
+**Starburst Gain** and **Starburst Scale** control the diffraction pattern.
+
+### Output
+
+**Output Mode** controls the host-compatible RGB result, including **Sources Only** diagnostics. The redundant Show Sources checkbox was removed.
+
+### Additional Controls
+
+OFX-only additions are kept separate: **Light Sources**, **Light Position**, **Manual Radiance**, **Optical Renderer** and **Max Ghost Pairs**. **Pair Selection** and **Pair Surface A/B** are a basic pair filter, not the original Nuke Pairs UI. A standard OFX overlay is used where the host supports it.
+
+## Pairs tab
+
+The original Nuke plugin dynamically exposes individual enable/disable controls for reflection pairs. Full per-pair toggle parity has not yet been achieved in this OFX port. The simplified pair controls are under **Additional Controls** instead of pretending to reproduce the Nuke interface.
+
+## Lens files
+
+All **1,370 original `.lens` files** are bundled under `FlareSim.ofx.bundle/Contents/Resources/lenses`. Each describes optical surface geometry, materials and coatings.
+
+For maximum current host compatibility, the v1.0.0 **Lens File** menu exposes only six built-in selections; adding a file to the folder does **not** make it appear in the stable six-choice dropdown. Developers can opt into the full menu with `-DFLARESIM_EXPERIMENTAL_FULL_LENS_CHOICES=ON`, but some hosts may crash while displaying the resulting 1,370-choice UI.
+
+## Render behaviour and performance tips
+
+The original Nuke default has no lens selected, allowing startup to skip expensive optical work. **Sources Only** bypasses ray tracing. Use **Preview Mode**, fewer **Max Sources**, lower **Ray Grid** and a higher **Threshold** to reduce render times.
+
+Numeric parameter legal bounds are separate from their narrower interactive slider display bounds, so large values remain available through typing without making small drags jump by enormous amounts. Individual OFX hosts may interpret the display bounds differently.
+
+## Building from source
+
+Requires CMake 3.24+, C++20, the included OpenFX headers and bundled original Nuke sources.
+
+Windows / Visual Studio 2022:
+
+~~~powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+cmake --build build --config Release --parallel 6
 ctest --test-dir build -C Release --output-on-failure
-```
+~~~
 
-The bundle is generated at:
+macOS / Apple Metal: see `.github/workflows/release-macos.yml` and `.github/workflows/build.yml`. The pipeline must complete successfully before a macOS ZIP is advertised.
 
-`build/FlareSim.ofx.bundle`
+The final bundle is under `build/FlareSim.ofx.bundle`.
 
-On Windows, copy **the entire** `FlareSim.ofx.bundle` folder (not only the `.ofx` binary) to `C:\Program Files\Common Files\OFX\Plugins\`. Restart the OFX host. This is the standard system-wide folder; hosts can have additional search paths.
+## License and bug reports
 
-For macOS / Linux use a suitable generator and copy the entire built bundle to a supported OFX plugin directory (usually `/Library/OFX/Plugins` on macOS or `/usr/OFX/Plugins` on Linux).
+MIT license; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for upstream attribution and third-party notices.
 
-## Controls and selecting a lens
-
-Original Nuke control labels and order are used in the main groups. Optional tools appear under **Additional Controls**. This effect contains no application-specific code.
-
-**Lens File:** The only visible lens selector, a standard OpenFX Choice. It scans bundled Contents/Resources/lenses/*.lens when the plugin descriptor loads. Add another .lens file to that directory and restart the host to include it in the list.
-
-
-**First use:** Select a Lens Preset such as AI_Nikkor_50mm_F1.2S.lens. The original Nuke default does not select a lens, so Ghost requires an explicit selection. Nuke Threshold=2 assumes HDR data. Typical SDR material (RGB between 0 and 1) has no highlights above 2, so lower Threshold (for example 0.1), or select Manual Position. **Sources Only** can be used before selecting a lens to inspect bright-pixel detection.
-
-**Output Mode:** Flare as RGB, Sources Only, Composite. Original Nuke names are retained where functionality is equivalent. Nuke Separate channels writes arbitrary named planes, which baseline OpenFX cannot guarantee across hosts; it is intentionally not presented as a nonfunctional option. The OFX default output is Flare as RGB, not Nuke's separate-channel default.
-
-**Light Position:** Optional normalized XY input in Additional Controls. Standard OpenFX V1 OpenGL and V2 DrawSuite interact handlers allow the crosshair to be dragged, automatically enabling Manual Position. If the host does not expose an overlay, the XY fields remain usable. No host-specific branches.
-
-**Pupil Jitter:** Original Off, Stratified, Halton, then optional Golden Angle (Vogel). No original sampler index was changed.
-
-## Nuke fidelity / OFX capability limits
-
-File-picker and overlay UIs are optional host features: standard OpenFX cannot force them to appear in every application. A built-in native lens Choice is the host-neutral fallback. Original Nuke named image channels and 500 individual optical pair controls remain incomplete. GPU ray tracing and blur have independent upstream tests; Nuke application rendering, Haze, Starburst, host colour management, macOS Metal and actual host overlay operation still need QA.
-
-## Status and caveats
-
-- Windows x64: CUDA 13.0, RTX 2070 SUPER. All six CTest cases pass: original Nuke CUDA pixel parity, original Nuke blur exact parity, core, all 1,370 lens files, OFX host and C ABI. Include FlareSimNukeReference.dll next to FlareSim.ofx.
-- macOS: Metal shader generation and native Objective-C++ adapter implemented; **build and GPU test still unverified**. Linux remains CPU-only.
-- Hosts: DaVinci Resolve, Fusion, Natron, Nuke, and others **must be verified individually**. An OFX API plugin is not guaranteed to work in every host/version.
-- GPU: CUDA/Metal only accelerate Ghost ray tracing and its blur currently. Automatic source detection, Haze and Starburst still run on CPU. GPU requires host-to-device staging / readback, not a zero-copy OFX host integration.
-- Fidelity: original Nuke GPU vs OFX upstream bridge 0.000353% relative L1 pixel error; original vs CPU 0.0043%; original vs optional AE optimized GPU 3.93%, on a single Nikkor fixture. Full Nuke host output parity is not yet certified.
-- Portable OFX 1.x lacks a universal, feature-equivalent mapping for Nuke custom image channels and per-pair checkboxes. Those remain documented follow-up items.
-- Output images support RGBA / RGB with 8-, 16-bit integer and 32-bit floating-point data; full-frame image input is required for optical evaluation, and render window writes respect OFX image bounds.
-- No verified production host UI/overlay. An optional overlay must use standard OFX capability checks.
-
-See [Nuke parity test report (Japanese)](docs/NUKE_PARITY_JA.md), [architecture](docs/ARCHITECTURE.md) and [GPU implementation](docs/GPU.md).
-
-## Attribution and licensing
-
-Original [FlareSim for Nuke](https://github.com/LocalStarlight/flaresim_nuke) by Steve Watts Kennedy; underlying optical renderer [blackhole-rt](https://github.com/space55/blackhole-rt) by Eamonn Nugent. After Effects adaptation and rendering improvements from [FlareSimAE](https://github.com/ken-eizo/flaresim_ae). License: MIT. OpenFX headers are BSD-3-Clause licensed by the OpenFX contributors (their license is provided under `vendor/openfx/LICENSE.md`). See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
-
-**Catalog note:** All 1,370 canonical Nuke prescriptions are present; 2 upstream files contain only a single optical surface and cannot form a two-bounce ghost. They are preserved unchanged and must not silently fall back to a different lens.
+For bugs, contact [@keneizo](https://x.com/keneizo) or [keneizo1013@gmail.com](mailto:keneizo1013@gmail.com).

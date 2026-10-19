@@ -276,7 +276,7 @@ int main(){
  // A strict OFX host rejects descriptor-time paramGetHandle. Properties
  // must be assigned to the exact paramDefine descriptor returned handle.
  auto& catalog=effect.parameters.params.at("lens_preset")->props.strings[kOfxParamPropChoiceOption];
- if(catalog.size()!=1371 || catalog[1]!="AI_Nikkor_50mm_F1.2S.lens")return 40;
+ if(catalog.size()!=7 || catalog[1]!="AI_Nikkor_50mm_F1.2S.lens")return 40;
  if(effect.parameters.params.at("gain")->props.strings[kOfxParamPropParent][0]!="nuke_ghost")return 41;
  if(effect.parameters.params.at("fov_h")->props.strings[kOfxParamPropParent][0]!="nuke_camera")return 42;
  auto& outputChoices=effect.parameters.params.at("output_format")->props.strings[kOfxParamPropChoiceOption];

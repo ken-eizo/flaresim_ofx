@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(FlareSimOFX VERSION 0.1.0 LANGUAGES CXX)
+project(FlareSimOFX VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,10 @@ endif()
 
 add_library(FlareSimOFX MODULE src/FlareSimOFX.cpp gpu/FlareSimNukeBridge.cpp)
 target_include_directories(FlareSimOFX PRIVATE ${OFX_HEADERS} gpu)
+option(FLARESIM_EXPERIMENTAL_FULL_LENS_CHOICES "EXPERIMENTAL: expose all 1370 items in one menu (may crash hosts)" OFF)
+if(FLARESIM_EXPERIMENTAL_FULL_LENS_CHOICES)
+  target_compile_definitions(FlareSimOFX PRIVATE FLARESIM_EXPERIMENTAL_FULL_LENS_CHOICES=1)
+endif()
 if(WIN32 OR APPLE)
   target_sources(FlareSimOFX PRIVATE src/FlareSimOverlay.cpp)
   target_compile_definitions(FlareSimOFX PRIVATE FLARESIM_HAVE_OVERLAY=1)

@@ -1,25 +1,23 @@
-# Third-party notices
+# Third-party notices — FlareSim OFX
 
-## Original FlareSim/Nuke source and lens descriptions
+## Original FlareSim for Nuke
 
-FlareSimAE is derived from the open-source [flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke) project, which acknowledges the original work of Eamonn Nugent (space55/blackhole-rt) and the Nuke adaptation by Steve Watts Kennedy (LocalStarlight).
+This project ports source code and lens prescriptions from [LocalStarlight/flaresim_nuke](https://github.com/LocalStarlight/flaresim_nuke) by Steve Watts Kennedy. The physical ray tracing work is based on [space55/blackhole-rt](https://github.com/space55/blackhole-rt) by Eamonn Nugent. Original authorship, copyright, attribution and licenses remain acknowledged. The OpenFX adaptation is unofficial.
 
-Original copyright notices and the full **MIT license** are preserved in [upstream/LICENSE](upstream/LICENSE). Original source, data and provenance are separated in [upstream/](upstream/).
+The 1,370 original lens prescription files are retained inside the OFX bundle. Lens brands and names identify optical prescriptions; they do not imply manufacturer endorsement.
 
-Modifications for Adobe After Effects (SmartFX host adapter, custom lens controls, catalog embedding, CPU/CUDA/Metal postprocessing, tests and other changes) are not represented as unmodified copies of the upstream project. The AE adaptation is unofficial; it has no claim of endorsement or support by the upstream creators or Adobe.
+## FlareSimAE contributions
 
-## Adobe After Effects SDK
+Selected CPU rendering, performance and GPU sampling adaptations originate from [ken-eizo/flaresim_ae](https://github.com/ken-eizo/flaresim_ae). These modifications are not claimed to be unchanged Nuke source.
 
-The After Effects SDK (headers, `AEFX_SuiteHelper.c`, official examples and other Adobe software) is not included here. Users must obtain it separately and comply with Adobe's terms. This repository does not confer rights to distribute Adobe SDK components.
+## OpenFX headers
 
-## NVIDIA CUDA Toolkit
+OpenFX C API headers were contributed by the OpenFX project and are distributed under their own BSD-3-Clause licensing terms, preserved in vendor/openfx.
 
-The NVIDIA CUDA Toolkit and proprietary runtime components are not included in this source repository. CUDA compilation and runtime distribution follow NVIDIA's applicable licenses.
+## CUDA and Apple Metal
 
-## Lens prescriptions
+The NVIDIA CUDA Toolkit, NVIDIA GPU driver, Apple frameworks and proprietary compiler tooling are not bundled as source dependencies; respective licenses and SDK terms apply. The Windows package includes binaries compiled using CUDA but not the CUDA Toolkit itself.
 
-The 1,370 `.lens` prescriptions are copied from the upstream lens catalog for compatibility and retained with the original upstream source and license attribution. Lens names are identification labels, not a claim that the corresponding lens manufacturers endorse or verify the simulation.
+This repository is neither officially affiliated with Nuke/Foundry, Blackmagic Design, SideFX, Adobe, Apple, NVIDIA, nor the original FlareSim authors.
 
-## Copyright updates
-
-Contributors retain any ownership rights applicable to their contributions and must have the rights needed to submit code under this repository's license. If additional third-party code is included in the future, its copyright and licensing conditions must be recorded here before distribution.
+See LICENSE and individual vendor directories for complete license text.
